@@ -31,6 +31,10 @@
 - [x] 2.4 Verify the staged site works when served from a subdirectory: serve the publish directory
       under a `/prisjagt/` path locally and confirm the page, script and vendored assets all load
       with no request to the host root
+- [ ] 2.5 Pass `enablement: true` to `actions/configure-pages` so the workflow creates the Pages
+      site instead of failing with "Get Pages site failed ... Not Found" when none exists; verify
+      on a real run that the step succeeds against a repository whose `has_pages` was false, and
+      that a later run against an already-enabled repository still succeeds
 
 ## 3. Documentation
 
@@ -56,7 +60,14 @@
 
 ## Workflow follow-up
 
-- Register `https://diogomonte.github.io` under Origins on the API key, and create the
-  `SALLING_API_KEY` repository secret. Both are outside the repository and must be done by a human
-  before the deployed site can work.
-- Set Settings -> Pages -> Source to "GitHub Actions", otherwise the workflow deploys nothing.
+Two steps remain outside the repository. Neither can be automated from here, and the deployed site
+does not work until both are done:
+
+- Register `https://diogomonte.github.io` under Origins on the API key. Verified still missing: a
+  request carrying that origin comes back without an `Access-Control-Allow-Origin` header, so every
+  call from the published site would fail in the browser while the same key works from `curl`.
+- Create the `SALLING_API_KEY` repository secret, or the deploy fails at the injection step by
+  design.
+
+Setting Settings -> Pages -> Source by hand is no longer required once task 2.5 lands; it stays
+the fallback for repositories where API-driven enablement is disallowed.

@@ -76,6 +76,27 @@ accident under an exclude list, and correctly ignored under an allowlist.
 No build runs: `vendor/tailwind.css` is committed and copied as-is, so a broken toolchain cannot
 break a deploy.
 
+### Pages enablement is automated, with the manual toggle as fallback
+
+`actions/configure-pages` queries the Pages API for an existing site and fails with a 404 when
+none has been created - observed as "Get Pages site failed ... Not Found" on the first run,
+with the repository reporting `has_pages: false`. Passing `enablement: true` makes the action
+create the site itself rather than requiring someone to set Settings -> Pages -> Source by hand
+first.
+
+This is preferred over the manual toggle because it removes the one setup step that is invisible
+from the repository: a fork or a fresh clone provisions itself, and the failure mode is a readable
+workflow error rather than a setting nobody remembers. The workflow already declares `pages: write`
+and the repository is public and user-owned, which is what the API-driven path needs.
+
+*Fallback:* some organisation-owned repositories disallow API-driven enablement. There the manual
+toggle remains the route, and the symptom is the same 404, so the error message points at the same
+fix either way.
+
+Note what this does **not** solve: the origin registration on the API key lives in Salling Group's
+portal and no workflow can perform it. Enabling Pages gets a site published; it does not get its
+requests answered.
+
 ### Injection is a string substitution on a marker, not a templating step
 
 The page carries an inert placeholder script that the workflow replaces. A substitution that finds
