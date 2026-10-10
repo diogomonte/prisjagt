@@ -77,13 +77,37 @@ Scanning needs a secure context — `https://` or `localhost`.
   no framework, no modules.
 - `vendor/` — Leaflet 1.9.4, vendored so there is no CDN dependency.
 
-Store locations are cached in `localStorage` for 24 hours (they rarely change), which keeps your
-API quota available for price lookups. Clearance data is always fetched live, cached only for the
-current session; "Opdatér" forces a refresh.
+### Caching
 
-Barcode lookups are cached for 7 days under `sg_ean_v1:<ean>` keys — regular prices move slowly,
-and this is the main defence for your API quota. When storage fills up, the oldest quarter of
-cached prices is dropped.
+Everything is cached in `localStorage`, because the API's rate limiting is strict (see below):
+
+| Key | Holds | Lifetime |
+|---|---|---|
+| `sg_stores_v1` | the store list for the map | 24 hours |
+| `sg_clear_v1:<storeId>` | that store's clearance offers | 30 minutes |
+| `sg_ean_v1:<storeId>:<ean>` | one product's regular price at one store | 7 days |
+
+Cached offers are shown **immediately** and refreshed in the background when older than 30
+minutes, so reloading the page costs no requests at all. The panel always shows "Opdateret kl.
+HH:MM" so you can see how old a price is, and "Opdatér" forces a fresh fetch. If a background
+refresh fails, the saved prices stay on screen rather than vanishing.
+
+Only the fields the interface renders are stored — measured, 311 bytes per offer instead of 607,
+so all ~90 Copenhagen stores take about 0.7 MB. When storage fills up, the oldest quarter of that
+namespace is dropped; your API key is never evicted.
+
+### Rate limiting (why the app paces itself)
+
+Salling Group's spike protection blocks **by IP address, not by API key** — six requests in about
+two seconds was enough to earn
+`429 "Your IP (…) has been blocked due to excessive requests. Try again in a minute."` A block
+therefore affects everyone sharing that address, not just the person who triggered it.
+
+So Prisjagt sends at most one request at a time, at least 400 ms apart, and coalesces duplicate
+in-flight requests. After a 429 it stops sending for a cooldown and shows a countdown in the
+footer; cached stores still open normally while it waits. The `retry-after` header is not trusted
+— it was observed returning `46443` (12.9 hours) while the body said "a minute" — so the value is
+clamped to between 5 and 300 seconds.
 
 ## Self-hosting
 

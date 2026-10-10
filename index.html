@@ -210,6 +210,15 @@
   }
   #scan .small { color: #ddd; }
 
+  .budget:empty { display: none; }
+  .budget {
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--card);
+    border: 1px solid var(--line);
+  }
+  .budget.waiting { color: var(--danger); border-color: var(--danger); }
+
   .leaflet-container { font: inherit; }
 </style>
 </head>
@@ -253,6 +262,7 @@
 
 <footer id="app-foot" class="hidden">
   <span>Data: Salling Group API · Kort: © OpenStreetMap-bidragydere · Leaflet</span>
+  <span id="budget" class="budget"></span>
   <span class="spacer" style="flex:1 1 auto"></span>
   <button type="button" class="linkbtn" id="forget">Glem min API-nøgle</button>
 </footer>

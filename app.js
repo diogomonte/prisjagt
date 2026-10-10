@@ -12,7 +12,6 @@
   var PER_PAGE = 100;
   var TOKEN_KEY = 'sg_token';
   var STORES_KEY = 'sg_stores_v1';
-  var STORES_TTL = 24 * 60 * 60 * 1000;
   var BRANDS = {
     netto: '#ffd400',
     foetex: '#004b93',
@@ -33,7 +32,82 @@
     try { return localStorage.getItem(TOKEN_KEY); } catch (e) { return null; }
   }
 
-  function sgFetch(path, overrideToken) {
+  /* ---------- request pacing ---------- */
+
+  // Salling Group blocks by IP after a short burst - six requests in about two
+  // seconds was enough - and such a block hits every user behind that address.
+  // So everything funnels through one queue: one request in flight, spaced, and
+  // identical concurrent requests share a single response.
+  var MIN_GAP = 400;
+  var COOLDOWN_MIN = 5000;
+  var COOLDOWN_MAX = 300000;
+  var COOLDOWN_DEFAULT = 60000;
+
+  var queue = [];
+  var inFlight = new Map();
+  var sending = false;
+  var lastStart = 0;
+  var cooldownUntil = 0;
+  var onBudgetChange = null;
+
+  function now() { return Date.now(); }
+
+  function cooldownRemaining() {
+    return Math.max(0, cooldownUntil - now());
+  }
+
+  function budgetChanged() {
+    if (onBudgetChange) onBudgetChange();
+  }
+
+  function cooldownError() {
+    var err = new Error('For mange forespørgsler');
+    err.statusCode = 429;
+    err.cooldown = Math.ceil(cooldownRemaining() / 1000);
+    return err;
+  }
+
+  // The API advertised retry-after: 46443 (12.9 hours) while its body said "try
+  // again in a minute", so the header is clamped rather than trusted.
+  function cooldownDelay(res) {
+    var header = res && res.headers && res.headers.get ? res.headers.get('retry-after') : null;
+    var seconds = header === null || header === undefined || header === '' ? NaN : Number(header);
+    if (!isFinite(seconds) || seconds <= 0) return COOLDOWN_DEFAULT;
+    return Math.min(COOLDOWN_MAX, Math.max(COOLDOWN_MIN, seconds * 1000));
+  }
+
+  function pump() {
+    if (sending || !queue.length) return;
+
+    if (cooldownRemaining() > 0) {
+      // Fail fast rather than queueing behind the gate: releasing a held queue
+      // all at once is the burst we are trying to avoid.
+      var blocked = queue.splice(0, queue.length);
+      blocked.forEach(function (job) { job.reject(cooldownError()); });
+      return;
+    }
+
+    var wait = Math.max(0, lastStart + MIN_GAP - now());
+    if (wait > 0) {
+      setTimeout(pump, wait);
+      return;
+    }
+
+    var next = queue.shift();
+    sending = true;
+    lastStart = now();
+    rawFetch(next.path, next.token).then(function (value) {
+      sending = false;
+      next.resolve(value);
+      pump();
+    }, function (err) {
+      sending = false;
+      next.reject(err);
+      pump();
+    });
+  }
+
+  function rawFetch(path, overrideToken) {
     var t = overrideToken || token();
     return fetch(API + path, { headers: { Authorization: 'Bearer ' + t } })
       .then(function (res) {
@@ -44,9 +118,34 @@
           var err = new Error(
             (json && (json.error || json.errorMessage)) || ('HTTP ' + res.status));
           err.statusCode = res.status;
+          if (res.status === 429) {
+            cooldownUntil = now() + cooldownDelay(res);
+            err.cooldown = Math.ceil(cooldownRemaining() / 1000);
+            budgetChanged();
+          }
           throw err;
         });
       });
+  }
+
+  function sgFetch(path, overrideToken) {
+    if (cooldownRemaining() > 0) return Promise.reject(cooldownError());
+
+    // Coalesce only unauthenticated-by-default calls on the same path; a call
+    // with an explicit token is a credential check and must not be shared.
+    if (!overrideToken && inFlight.has(path)) return inFlight.get(path);
+
+    var pending = new Promise(function (resolve, reject) {
+      queue.push({ path: path, token: overrideToken, resolve: resolve, reject: reject });
+      pump();
+    });
+
+    if (!overrideToken) {
+      var settle = function () { inFlight.delete(path); };
+      inFlight.set(path, pending);
+      pending.then(settle, settle);
+    }
+    return pending;
   }
 
   function describe(err) {
@@ -69,10 +168,142 @@
       'Tjek også internetforbindelse og annonceblokker.';
   }
 
-  /* ---------- EAN price lookup ---------- */
+  /* ---------- cache ---------- */
 
   var EAN_PREFIX = 'sg_ean_v1:';
-  var EAN_TTL = 7 * 24 * 60 * 60 * 1000;
+  var CLEAR_PREFIX = 'sg_clear_v1:';
+  var TTL = {
+    stores: 24 * 60 * 60 * 1000,        // locations barely move
+    clearances: 30 * 60 * 1000,         // stock shifts during the day
+    ean: 7 * 24 * 60 * 60 * 1000        // regular prices move slowly
+  };
+
+  // Returns { data, age, stale } so callers can tell "nothing cached" from
+  // "cached but old" - the latter is still worth rendering while it refreshes.
+  // `legacyField` lets a namespace that predates this helper keep its entries:
+  // the store list used to be written as { at, stores: [...] }.
+  function cacheGet(key, ttl, legacyField) {
+    try {
+      var raw = localStorage.getItem(key);
+      if (!raw) return null;
+      var hit = JSON.parse(raw);
+      if (!hit || typeof hit.at !== 'number') return null;
+      if ((hit.data === undefined || hit.data === null) &&
+          legacyField && hit[legacyField] !== undefined && hit[legacyField] !== null) {
+        hit = { at: hit.at, data: hit[legacyField] };
+      }
+      if (hit.data === undefined || hit.data === null) return null;
+      var age = Date.now() - hit.at;
+      return { data: hit.data, age: age, at: hit.at, stale: age > ttl };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function cacheEntries(prefix) {
+    var out = [];
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var key = localStorage.key(i);
+        if (!key || key.indexOf(prefix) !== 0) continue;
+        var at = 0;
+        try {
+          var parsed = JSON.parse(localStorage.getItem(key));
+          at = (parsed && typeof parsed.at === 'number') ? parsed.at : 0;
+        } catch (e) { /* unparseable - evict first */ }
+        out.push({ key: key, at: at });
+      }
+    } catch (e) { /* storage unavailable */ }
+    return out;
+  }
+
+  // Frees room when localStorage is full: drops the oldest quarter of one
+  // namespace (unparseable entries count as oldest). Credentials are never
+  // eviction candidates - only prefixed cache keys are considered.
+  function evictOldest(prefix) {
+    var entries = cacheEntries(prefix);
+    if (!entries.length) return 0;
+    entries.sort(function (a, b) { return a.at - b.at; });
+    var drop = Math.max(1, Math.ceil(entries.length * 0.25));
+    var removed = 0;
+    for (var i = 0; i < drop; i++) {
+      try {
+        localStorage.removeItem(entries[i].key);
+        removed++;
+      } catch (e) { /* ignore */ }
+    }
+    return removed;
+  }
+
+  function cachePut(key, data, evictPrefix) {
+    var payload = JSON.stringify({ at: Date.now(), data: data });
+    try {
+      localStorage.setItem(key, payload);
+      return true;
+    } catch (e) {
+      if (evictPrefix) evictOldest(evictPrefix);
+      try {
+        localStorage.setItem(key, payload);
+        return true;
+      } catch (e2) {
+        return false;
+      }
+    }
+  }
+
+  function cacheDrop(prefix) {
+    var entries = cacheEntries(prefix);
+    var removed = 0;
+    for (var i = 0; i < entries.length; i++) {
+      try {
+        localStorage.removeItem(entries[i].key);
+        removed++;
+      } catch (e) { /* ignore */ }
+    }
+    return removed;
+  }
+
+  /* ---------- clearance cache ---------- */
+
+  function clearKey(storeId) { return CLEAR_PREFIX + storeId; }
+
+  // Stores only what the UI renders: 290 bytes per row instead of 639, which
+  // is what keeps a whole city inside the storage budget. Dropped on purpose:
+  // categories (both languages), lastUpdate, startTime, endTime, currency, and
+  // discount (derivable from the two prices). Nothing here is rendered.
+  function trimClearances(data) {
+    var rows = (data && data.clearances) || [];
+    var out = [];
+    for (var i = 0; i < rows.length; i++) {
+      var offer = rows[i].offer || {};
+      var product = rows[i].product || {};
+      out.push({
+        offer: {
+          newPrice: offer.newPrice,
+          originalPrice: offer.originalPrice,
+          percentDiscount: offer.percentDiscount,
+          stock: offer.stock,
+          stockUnit: offer.stockUnit
+        },
+        product: {
+          description: product.description,
+          ean: product.ean,
+          image: product.image
+        }
+      });
+    }
+    return { clearances: out };
+  }
+
+  function cachedClearances(storeId) {
+    return cacheGet(clearKey(storeId), TTL.clearances);
+  }
+
+  function storeClearances(storeId, data) {
+    return cachePut(clearKey(storeId), trimClearances(data), CLEAR_PREFIX);
+  }
+
+  /* ---------- EAN price lookup ---------- */
 
   function cleanEan(input) {
     return String(input == null ? '' : input).replace(/\s+/g, '');
@@ -92,67 +323,12 @@
   }
 
   function eanCacheGet(storeId, ean) {
-    try {
-      var raw = localStorage.getItem(eanCacheKey(storeId, ean));
-      if (!raw) return null;
-      var hit = JSON.parse(raw);
-      if (!hit || typeof hit.at !== 'number' || !hit.data) return null;
-      if (Date.now() - hit.at > EAN_TTL) return null;
-      return hit.data;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  function eanCacheEntries() {
-    var out = [];
-    try {
-      for (var i = 0; i < localStorage.length; i++) {
-        var key = localStorage.key(i);
-        if (!key || key.indexOf(EAN_PREFIX) !== 0) continue;
-        var at = 0;
-        try {
-          var parsed = JSON.parse(localStorage.getItem(key));
-          at = (parsed && typeof parsed.at === 'number') ? parsed.at : 0;
-        } catch (e) { /* unparseable - evict first */ }
-        out.push({ key: key, at: at });
-      }
-    } catch (e) { /* storage unavailable */ }
-    return out;
-  }
-
-  // Frees room for new lookups when localStorage is full: drops the oldest
-  // quarter of cached prices (unparseable entries count as oldest).
-  function evictOldestEans() {
-    var entries = eanCacheEntries();
-    if (!entries.length) return 0;
-    entries.sort(function (a, b) { return a.at - b.at; });
-    var drop = Math.max(1, Math.ceil(entries.length * 0.25));
-    var removed = 0;
-    for (var i = 0; i < drop; i++) {
-      try {
-        localStorage.removeItem(entries[i].key);
-        removed++;
-      } catch (e) { /* ignore */ }
-    }
-    return removed;
+    var hit = cacheGet(eanCacheKey(storeId, ean), TTL.ean);
+    return hit && !hit.stale ? hit.data : null;
   }
 
   function eanCacheSet(storeId, ean, data) {
-    var key = eanCacheKey(storeId, ean);
-    var payload = JSON.stringify({ at: Date.now(), data: data });
-    try {
-      localStorage.setItem(key, payload);
-      return true;
-    } catch (e) {
-      evictOldestEans();
-      try {
-        localStorage.setItem(key, payload);
-        return true;
-      } catch (e2) {
-        return false;
-      }
-    }
+    return cachePut(eanCacheKey(storeId, ean), data, EAN_PREFIX);
   }
 
   var eanInFlight = new Map();
@@ -290,6 +466,8 @@
       localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem(STORES_KEY);
     } catch (e) { /* ignore */ }
+    cacheDrop(CLEAR_PREFIX);
+    cacheDrop(EAN_PREFIX);
     offerCache.clear();
     showGate(message || 'Nøglen er slettet fra din browser.', false);
   }
@@ -322,16 +500,9 @@
   /* ---------- stores ---------- */
 
   function cachedStores() {
-    try {
-      var raw = localStorage.getItem(STORES_KEY);
-      if (!raw) return null;
-      var hit = JSON.parse(raw);
-      if (!hit || !hit.at || !Array.isArray(hit.stores)) return null;
-      if (Date.now() - hit.at > STORES_TTL) return null;
-      return hit.stores;
-    } catch (e) {
-      return null;
-    }
+    var hit = cacheGet(STORES_KEY, TTL.stores, 'stores');
+    if (!hit || hit.stale || !Array.isArray(hit.data)) return null;
+    return hit.data;
   }
 
   function usable(store) {
@@ -353,9 +524,7 @@
       });
     }
     return page(1).then(function (stores) {
-      try {
-        localStorage.setItem(STORES_KEY, JSON.stringify({ at: Date.now(), stores: stores }));
-      } catch (e) { /* quota - fine */ }
+      cachePut(STORES_KEY, stores, CLEAR_PREFIX);
       return stores;
     });
   }
@@ -537,9 +706,16 @@
     return line;
   }
 
-  function renderOffers(store, data) {
+  function clockTime(ms) {
+    var d = new Date(ms);
+    var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+    return pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+
+  function renderOffers(store, data, meta) {
     var panel = el('panel');
     panel.textContent = '';
+    meta = meta || {};
 
     var refresh = document.createElement('div');
     refresh.className = 'row';
@@ -547,11 +723,32 @@
     btn.type = 'button';
     btn.textContent = 'Opdatér';
     btn.onclick = function () {
+      var waiting = Math.ceil(cooldownRemaining() / 1000);
+      if (waiting > 0) {
+        setStatus('For mange forespørgsler — venter ' + waiting + ' s');
+        return;
+      }
       offerCache.delete(store.id);
-      selectStore(store);
+      selectStore(store, true);
     };
     refresh.appendChild(btn);
+
+    // Cached data must never be presented as live.
+    if (meta.at) {
+      var stamp = document.createElement('span');
+      stamp.className = 'small muted';
+      stamp.textContent = 'Opdateret kl. ' + clockTime(meta.at) +
+        (meta.refreshing ? ' · opdaterer…' : '');
+      refresh.appendChild(stamp);
+    }
     panel.appendChild(panelHead(store, refresh));
+
+    if (meta.refreshError) {
+      var warn = document.createElement('p');
+      warn.className = 'small err';
+      warn.textContent = 'Kunne ikke opdatere — viser gemte priser. ' + meta.refreshError;
+      panel.appendChild(warn);
+    }
 
     var items = (data && data.clearances) || [];
     if (!items.length) {
@@ -599,11 +796,53 @@
     panelMessage(wrap);
   }
 
-  function selectStore(store) {
+  function fetchClearances(store, meta) {
+    return sgFetch('/v1/food-waste/' + encodeURIComponent(store.id))
+      .then(function (data) {
+        var trimmed = trimClearances(data);
+        storeClearances(store.id, data);
+        offerCache.set(store.id, { data: trimmed, at: now() });
+        return trimmed;
+      });
+  }
+
+  // Three tiers: the in-memory map (no parse), then localStorage (no request),
+  // then the network. Cached data is rendered immediately even when stale, and
+  // refreshed behind it - a refresh must never blank out usable prices.
+  function selectStore(store, force) {
     selected = store.id;
     selectedStore = store;
-    if (offerCache.has(store.id)) {
-      renderOffers(store, offerCache.get(store.id));
+
+    var memory = offerCache.get(store.id);
+    var cached = null;
+    if (!force && memory) {
+      cached = { data: memory.data, at: memory.at, stale: now() - memory.at > TTL.clearances };
+    } else if (!force) {
+      var stored = cachedClearances(store.id);
+      if (stored) {
+        cached = { data: stored.data, at: stored.at, stale: stored.stale };
+        offerCache.set(store.id, { data: stored.data, at: stored.at });
+      }
+    }
+
+    if (cached) {
+      var needsRefresh = cached.stale && cooldownRemaining() === 0;
+      renderOffers(store, cached.data, { at: cached.at, refreshing: needsRefresh });
+      if (!needsRefresh) return;
+
+      fetchClearances(store).then(function (fresh) {
+        if (selected !== store.id) return;
+        renderOffers(store, fresh, { at: now(), refreshing: false });
+      }, function (err) {
+        if (err.statusCode === 401) { forgetToken('Nøglen er ikke længere gyldig. Indsæt en ny.'); return; }
+        if (selected !== store.id) return;
+        // Keep the data that is already on screen; only report the failure.
+        renderOffers(store, cached.data, {
+          at: cached.at,
+          refreshing: false,
+          refreshError: describe(err)
+        });
+      });
       return;
     }
 
@@ -615,17 +854,18 @@
     loading.appendChild(p);
     panelMessage(loading);
 
-    sgFetch('/v1/food-waste/' + encodeURIComponent(store.id))
+    fetchClearances(store)
       .then(function (data) {
-        offerCache.set(store.id, data);
-        if (selected === store.id) renderOffers(store, data);
+        if (selected === store.id) renderOffers(store, data, { at: now(), refreshing: false });
       })
       .catch(function (err) {
         if (err.statusCode === 401) { forgetToken('Nøglen er ikke længere gyldig. Indsæt en ny.'); return; }
         if (selected !== store.id) return;
         if (err.statusCode === 404) {
-          offerCache.set(store.id, { clearances: [] });
-          renderOffers(store, { clearances: [] });
+          var empty = { clearances: [] };
+          storeClearances(store.id, empty);
+          offerCache.set(store.id, { data: empty, at: now() });
+          renderOffers(store, empty, { at: now(), refreshing: false });
           return;
         }
         panelError(describe(err), function () { selectStore(store); });
@@ -841,6 +1081,32 @@
       });
   }
 
+  /* ---------- budget status ---------- */
+
+  var statusTimer = null;
+
+  function setStatus(text, waiting) {
+    var node = el('budget');
+    if (!node) return;
+    node.textContent = text || '';
+    node.className = 'budget' + (waiting ? ' waiting' : '');
+  }
+
+  // Shows the cooldown counting down, so a paused app never looks broken.
+  function renderBudget() {
+    var remaining = Math.ceil(cooldownRemaining() / 1000);
+    if (remaining > 0) {
+      setStatus('For mange forespørgsler — venter ' + remaining + ' s', true);
+      if (!statusTimer) statusTimer = setInterval(renderBudget, 1000);
+      return;
+    }
+    if (statusTimer) {
+      clearInterval(statusTimer);
+      statusTimer = null;
+    }
+    setStatus('', false);
+  }
+
   /* ---------- boot ---------- */
 
   function hint(text) {
@@ -878,6 +1144,7 @@
       });
   }
 
+  onBudgetChange = renderBudget;
   el('gate-form').addEventListener('submit', saveToken);
   el('ean-form').addEventListener('submit', function (ev) {
     ev.preventDefault();
