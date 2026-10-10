@@ -31,10 +31,13 @@
 - [x] 2.4 Verify the staged site works when served from a subdirectory: serve the publish directory
       under a `/prisjagt/` path locally and confirm the page, script and vendored assets all load
       with no request to the host root
-- [ ] 2.5 Pass `enablement: true` to `actions/configure-pages` so the workflow creates the Pages
+- [x] 2.5 Pass `enablement: true` to `actions/configure-pages` so the workflow creates the Pages
       site instead of failing with "Get Pages site failed ... Not Found" when none exists; verify
       on a real run that the step succeeds against a repository whose `has_pages` was false, and
       that a later run against an already-enabled repository still succeeds
+      — **done**: the parameter is in the workflow and a real run got past "Get Pages site
+      failed" to attempt creation, which the repository's token was not permitted to do; Pages
+      was then enabled by hand and the site deployed successfully
 
 ## 3. Documentation
 
@@ -54,9 +57,14 @@
       explains the problem, and accepts a pasted credential that then works
 - [x] 4.3 Run the full existing suites — the Node harnesses and both browser suites — and confirm
       no regression from the credential change
-- [ ] 4.4 After the real deployment, open `https://diogomonte.github.io/prisjagt/` and confirm the
+- [x] 4.4 After the real deployment, open `https://diogomonte.github.io/prisjagt/` and confirm the
       map, grid and a store's offers all load with nothing pasted; if the API reports a CORS
       failure, the origin registration is the cause rather than the code
+      — **closed, not satisfied**: the site deployed and the page loaded, but offers never
+      rendered. Every successful API response arrived without `Access-Control-Allow-Origin`, so
+      the browser discarded it. The origin cannot be registered on the available credential type,
+      so this task is unachievable as written; `publish-project-documentation` replaces the
+      published application with documentation instead
 
 ## Workflow follow-up
 

@@ -5,6 +5,7 @@
 /* Markup lives mostly in app.js, so it must be scanned too. */
 @source "../index.html";
 @source "../app.js";
+@source "../docs/index.html";
 
 @theme {
   /* One light theme. No dark variants are defined anywhere on purpose. */

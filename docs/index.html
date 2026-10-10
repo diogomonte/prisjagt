@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prisjagt — live supermarket clearance prices, built spec-first</title>
+<meta name="description" content="An open-source map of live clearance prices in Copenhagen supermarkets, and the spec-driven process that produced it.">
+<meta name="color-scheme" content="light">
+<link rel="stylesheet" href="vendor/tailwind.css">
+</head>
+<body class="bg-brand-wash text-ink antialiased">
+
+<header class="border-b border-brand-line bg-white">
+  <div class="mx-auto max-w-3xl px-5 py-10">
+    <h1 class="text-4xl font-bold text-brand">Prisjagt</h1>
+    <p class="mt-3 text-lg text-ink">
+      An open-source web app that shows <strong>live clearance prices</strong> in Copenhagen
+      supermarkets — Netto, føtex, Bilka and Salling — on a map.
+    </p>
+    <p class="mt-3 text-muted">
+      Danish supermarkets mark down short-dated food every day. Salling Group publishes those
+      markdowns through a free API. Prisjagt puts them on one screen: every discounted item near
+      you, biggest saving first, with the store that has it.
+    </p>
+    <p class="mt-4 text-sm text-muted">
+      It runs on your own machine. <a class="font-medium text-brand underline" href="#hosting">It
+      cannot be hosted publicly</a>, for a reason worth reading.
+    </p>
+  </div>
+</header>
+
+<main class="mx-auto max-w-3xl px-5 py-10 space-y-14">
+
+  <!-- ---------- evidence ---------- -->
+  <section>
+    <h2 class="text-2xl font-bold text-ink">What it looks like</h2>
+    <p class="mt-2 text-muted">
+      Screenshots from the app running against the live Salling Group API on 10 October 2026.
+      Everything shown is real: real products, real markdowns, real stores.
+    </p>
+
+    <figure class="mt-6">
+      <img src="assets/prisjagt-desktop.jpg" class="w-full rounded-xl border border-brand-line shadow-sm"
+           alt="The Prisjagt interface: a map of Copenhagen on the left with coloured store pins, and a grid of product cards on the right. Each card shows a product photo, a discount badge, the new price in green and the old price struck through.">
+      <figcaption class="mt-2 text-sm text-muted">
+        418 clearance items from 16 stores, loaded in a single API request and sorted by discount.
+        Top left: minced-pork sausage at <strong class="text-brand">4,00 kr.</strong> instead of
+        19,95 kr. — 80% off — at Netto Kampmannsgade. Clicking a map pin filters the grid to that
+        store without issuing another request.
+      </figcaption>
+    </figure>
+
+    <figure class="mt-8 flex flex-col items-center gap-2 sm:flex-row sm:items-start sm:gap-6">
+      <img src="assets/prisjagt-mobile.jpg" class="w-56 rounded-xl border border-brand-line shadow-sm"
+           alt="Prisjagt on a phone: a two-column grid of product cards with discount badges, and a Kort button that opens the map full-screen.">
+      <figcaption class="text-sm text-muted sm:pt-2">
+        On a phone the products take the whole screen and the map moves behind a
+        <em>Kort</em> button. The product grid is the subject; the map is navigation.
+        One light theme, deliberately — the app does not follow the system dark mode.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ---------- how it works ---------- -->
+  <section>
+    <h2 class="text-2xl font-bold text-ink">How it works</h2>
+    <ul class="mt-3 space-y-2 text-muted">
+      <li><strong class="text-ink">No framework, no build at deploy, no backend.</strong> One HTML
+        file, one JavaScript file, and two vendored stylesheets. Leaflet and a pre-generated
+        Tailwind build are committed, so nothing is fetched from a CDN at runtime.</li>
+      <li><strong class="text-ink">One request fills the screen.</strong> The bulk clearance
+        endpoint returns 16 stores and 418 offers in a single call — fetching store by store would
+        be 16 calls.</li>
+      <li><strong class="text-ink">Aggressive caching.</strong> Offers are cached 30 minutes and
+        served stale while revalidating, store locations 24 hours, barcode lookups 7 days. Only the
+        fields the interface renders are stored: 311 bytes per offer instead of 607.</li>
+      <li><strong class="text-ink">Paced requests.</strong> The API blocks by <em>IP address</em>
+        after a short burst, so every call goes through one queue, one at a time.</li>
+      <li><strong class="text-ink">Your own API key.</strong> Nothing is shared, nothing is
+        collected, there is no server to collect it.</li>
+    </ul>
+  </section>
+
+  <!-- ---------- run it ---------- -->
+  <section>
+    <h2 class="text-2xl font-bold text-ink">Running it yourself</h2>
+    <ol class="mt-3 list-decimal space-y-3 pl-5 text-muted">
+      <li>Get a free API key at
+        <a class="font-medium text-brand underline" href="https://developer.sallinggroup.dev"
+           target="_blank" rel="noopener noreferrer">developer.sallinggroup.dev</a>,
+        with access to <em>Anti Food Waste</em> and <em>Stores</em>
+        (<em>Products EAN</em> too, if you want barcode lookups).</li>
+      <li>Clone the repository and start the development server:
+        <pre class="mt-2 overflow-x-auto rounded-lg bg-white p-3 text-sm text-ink border border-brand-line"><code>git clone https://github.com/diogomonte/prisjagt
+cd prisjagt
+python3 dev-server.py</code></pre>
+      </li>
+      <li>Open <code class="rounded bg-white px-1 py-0.5 text-sm border border-brand-line">http://localhost:8000</code>
+        and paste your key. It is stored in your browser and sent only to Salling Group.</li>
+    </ol>
+    <p class="mt-3 text-sm text-muted">
+      <code class="rounded bg-white px-1 py-0.5 border border-brand-line">dev-server.py</code> is a
+      small local proxy. It forwards API calls and adds the cross-origin headers a browser needs —
+      which is exactly what cannot be done on a static host, and the subject of the next section.
+    </p>
+  </section>
+
+  <!-- ---------- the wall ---------- -->
+  <section id="hosting" class="scroll-mt-4">
+    <h2 class="text-2xl font-bold text-ink">Why this isn't just hosted somewhere</h2>
+    <p class="mt-2 text-muted">
+      This page sits at the URL where the app itself was meant to live. The app was deployed here,
+      loaded correctly, and then could not read a single API response. The cause is a quirk worth
+      documenting, because it is invisible until you hit it.
+    </p>
+    <p class="mt-3 text-muted">
+      Salling Group returns the <code class="rounded bg-white px-1 border border-brand-line">Access-Control-Allow-Origin</code>
+      header only for origins registered on your API credential. The twist:
+    </p>
+    <div class="mt-3 overflow-x-auto">
+      <table class="w-full border-collapse text-sm">
+        <thead>
+          <tr class="border-b border-brand-line text-left">
+            <th class="py-2 pr-4 font-semibold">Same request, from a public origin</th>
+            <th class="py-2 font-semibold">CORS header?</th>
+          </tr>
+        </thead>
+        <tbody class="text-muted">
+          <tr class="border-b border-brand-line/60">
+            <td class="py-2 pr-4">with a valid key &rarr; <code>200 OK</code></td>
+            <td class="py-2 font-semibold text-deal">absent</td>
+          </tr>
+          <tr>
+            <td class="py-2 pr-4">with no key &rarr; <code>401</code></td>
+            <td class="py-2 font-semibold text-brand">present</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="mt-3 text-muted">
+      So the browser can read every failure and no success. The request reaches the API, the API
+      answers it, and Chrome discards the response —
+      <code class="rounded bg-white px-1 border border-brand-line">net::ERR_FAILED 200 (OK)</code>.
+    </p>
+    <p class="mt-3 text-muted">
+      The fix would be to register the site's origin on the credential. Salling's documentation
+      describes front-end integrations and their portal contains exactly that field — but the
+      credential type available when creating a key exposes no way to set it. This affects
+      <em>any</em> visitor's key, not just one, so a hosted copy cannot work for anybody.
+      It is a constraint of the data provider, not a defect in the app: run it locally and
+      everything above works.
+    </p>
+  </section>
+
+  <!-- ---------- spec-driven ---------- -->
+  <section>
+    <h2 class="text-2xl font-bold text-ink">Built specification-first</h2>
+    <p class="mt-2 text-muted">
+      Every feature here was written down before it was written. The project uses
+      <a class="font-medium text-brand underline" href="https://github.com/Fission-AI/OpenSpec"
+         target="_blank" rel="noopener noreferrer">OpenSpec</a>, where a change moves through four
+      artifacts before any code is touched:
+    </p>
+
+    <div class="mt-4 overflow-x-auto rounded-xl border border-brand-line bg-white p-4">
+      <pre class="text-sm text-ink"><code>proposal.md   why this change exists, and what it is NOT
+     |
+     v
+spec.md       what the system must do - requirements and
+     |        testable scenarios, no implementation detail
+     v
+design.md     how, and why that way: decisions, rejected
+     |        alternatives, risks
+     v
+tasks.md      ordered steps, each stating how to verify it
+     |
+     v
+  code</code></pre>
+    </div>
+
+    <p class="mt-4 text-muted">
+      Five changes, <strong class="text-ink">31 requirements</strong> and
+      <strong class="text-ink">95 tracked tasks</strong> produced the app above — plus roughly 250
+      automated assertions, covering cache behaviour, request pacing, layout geometry and the
+      deployment pipeline.
+    </p>
+
+    <h3 class="mt-8 text-lg font-bold text-ink">What writing it down first actually caught</h3>
+    <p class="mt-2 text-muted">
+      The interesting part is not the process diagram — it is the specific errors that became
+      visible because a plan existed to contradict:
+    </p>
+    <ul class="mt-3 space-y-3 text-muted">
+      <li>
+        <strong class="text-ink">A cache that would have lied about prices.</strong> Prices differ
+        per store. The first implementation keyed the cache on barcode alone, so one shop's price
+        could be served for another. A spec scenario — <em>"the system never shows one store's
+        price as another store's price"</em> — turned that into a failing test instead of a bug
+        report.
+      </li>
+      <li>
+        <strong class="text-ink">A design decision that was simply wrong.</strong> The design
+        declared store-specific pricing a non-goal, asserting the endpoint was keyed by barcode
+        alone. The live API answered <code>400 "Missing storeId"</code>. The design was amended and
+        the reversal recorded rather than quietly patched.
+      </li>
+      <li>
+        <strong class="text-ink">A number that was measured, then re-measured.</strong> A design
+        claimed 290 bytes per cached offer. The implementation produced 311 — the original figure
+        came from an experiment using abbreviated keys, an approach the design itself had rejected.
+        Correcting the artifact mattered more than the 21 bytes.
+      </li>
+      <li>
+        <strong class="text-ink">An automation claim falsified the same day.</strong> A decision
+        recorded that a workflow parameter removed a manual setup step. The next deploy proved it
+        could not, for this repository. Both the claim and its falsification are in the design.
+      </li>
+      <li>
+        <strong class="text-ink">The rate limiter, measured instead of guessed.</strong> Six
+        requests 400 ms apart got the IP blocked; fourteen at 2 s apart did not. The API advertised
+        <code>retry-after: 46443</code> — 12.9 hours — while its own error body said "try again in
+        a minute", so the app clamps that value rather than trusting it.
+      </li>
+    </ul>
+
+    <p class="mt-6 text-muted">
+      None of that is flattering, which is the point: the artifacts are published unedited, with
+      the mistakes still in them.
+    </p>
+
+    <div class="mt-5 rounded-xl border border-brand-line bg-white p-4">
+      <h3 class="font-bold text-ink">Read the artifacts</h3>
+      <p class="mt-1 text-sm text-muted">Served as plain Markdown, exactly as committed.</p>
+      <ul class="mt-3 space-y-1 text-sm">
+        <li><a class="text-brand underline" href="openspec/changes/add-ean-price-lookup/proposal.md">add-ean-price-lookup</a>
+          — barcode lookup: <a class="text-brand underline" href="openspec/changes/add-ean-price-lookup/specs/price-lookup/spec.md">spec</a>,
+          <a class="text-brand underline" href="openspec/changes/add-ean-price-lookup/design.md">design</a>,
+          <a class="text-brand underline" href="openspec/changes/add-ean-price-lookup/tasks.md">tasks</a></li>
+        <li><a class="text-brand underline" href="openspec/changes/add-request-cache/proposal.md">add-request-cache</a>
+          — caching and pacing: <a class="text-brand underline" href="openspec/changes/add-request-cache/specs/api-request-budget/spec.md">spec</a>,
+          <a class="text-brand underline" href="openspec/changes/add-request-cache/design.md">design</a>,
+          <a class="text-brand underline" href="openspec/changes/add-request-cache/tasks.md">tasks</a></li>
+        <li><a class="text-brand underline" href="openspec/changes/redesign-product-first-layout/proposal.md">redesign-product-first-layout</a>
+          — this interface: <a class="text-brand underline" href="openspec/changes/redesign-product-first-layout/specs/offer-browsing/spec.md">spec</a>,
+          <a class="text-brand underline" href="openspec/changes/redesign-product-first-layout/design.md">design</a>,
+          <a class="text-brand underline" href="openspec/changes/redesign-product-first-layout/tasks.md">tasks</a></li>
+        <li><a class="text-brand underline" href="openspec/changes/deploy-to-github-pages/proposal.md">deploy-to-github-pages</a>
+          — the attempt that hit the wall above</li>
+        <li><a class="text-brand underline" href="openspec/changes/publish-project-documentation/proposal.md">publish-project-documentation</a>
+          — this page</li>
+      </ul>
+    </div>
+  </section>
+</main>
+
+<footer class="border-t border-brand-line bg-white">
+  <div class="mx-auto max-w-3xl px-5 py-6 text-sm text-muted">
+    <p>
+      <a class="font-medium text-brand underline" href="https://github.com/diogomonte/prisjagt">Source on GitHub</a>
+      · MIT licensed · Data from Salling Group · Maps © OpenStreetMap contributors
+    </p>
+    <p class="mt-2">
+      Unaffiliated with Salling Group. Prices come from their API and may lag the shelf. The
+      Products EAN API is licensed for educational, non-commercial use.
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>

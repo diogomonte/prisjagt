@@ -33,46 +33,33 @@ jobs:
 
       # Publish an explicit allowlist. An exclude list would silently publish
       # any directory added later; this cannot.
+      # The application is deliberately NOT published: every API call from a
+      # public origin is rejected by the browser, so a hosted copy cannot work.
+      # The site serves documentation plus the planning artifacts behind it.
       - name: Stage the site
         run: |
           set -euo pipefail
           mkdir -p dist
-          cp index.html app.js dist/
-          cp -R vendor dist/
-          echo "staged:"; find dist -type f | sort
-
-      # The site's API key. NOTE: this is embedded in a static page and is
-      # therefore PUBLIC - anyone can read it in the served HTML. The repository
-      # secret only keeps it out of the repo and the build log.
-      - name: Inject the API key
-        env:
-          SALLING_API_KEY: ${{ secrets.SALLING_API_KEY }}
-        run: |
-          set -euo pipefail
-          marker='/* PRISJAGT_TOKEN_INJECTION_POINT */'
-          if ! grep -qF "$marker" dist/index.html; then
-            echo "::error::Injection marker not found in index.html - refusing to publish a site with no credential."
-            exit 1
+          cp docs/index.html dist/index.html
+          cp -R docs/assets dist/assets
+          cp -R vendor dist/vendor
+          cp -R openspec dist/openspec
+          # The app must not be served - a broken demo is worse than a screenshot.
+          if [ -f dist/app.js ]; then
+            echo "::error::app.js must not be published."; exit 1
           fi
-          if [ -z "${SALLING_API_KEY}" ]; then
-            echo "::error::SALLING_API_KEY secret is empty. Set it in Settings -> Secrets and variables -> Actions."
-            exit 1
+          # No credential may reach the published output. Match real key
+          # material anywhere, but only flag a token assignment in the served
+          # page - the published artifacts discuss the variable by name, and
+          # prose about a credential is not a credential.
+          if grep -rqE 'SG_APIM_[A-Za-z0-9]{8}' dist; then
+            echo "::error::API key material reached the staged site."; exit 1
           fi
-          python3 - "$SALLING_API_KEY" <<'PY'
-          import json, sys, io
-          key = sys.argv[1]
-          marker = '/* PRISJAGT_TOKEN_INJECTION_POINT */'
-          path = 'dist/index.html'
-          page = io.open(path, encoding='utf-8').read()
-          # json.dumps gives correct JS string escaping for any key content
-          page = page.replace(marker, 'window.PRISJAGT_TOKEN = %s;' % json.dumps(key))
-          io.open(path, 'w', encoding='utf-8').write(page)
-          PY
-          if grep -qF "$marker" dist/index.html; then
-            echo "::error::Marker still present after substitution."
-            exit 1
+          if grep -qE 'PRISJAGT_TOKEN *=' dist/index.html; then
+            echo "::error::A token assignment reached the published page."; exit 1
           fi
-          echo "API key injected (it is public in the published page by design)."
+          echo "staged:"; find dist -type f | sort | head -40
+          echo "total files: $(find dist -type f | wc -l)"
 
       - name: Upload site
         uses: actions/upload-pages-artifact@v3

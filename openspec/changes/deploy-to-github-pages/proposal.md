@@ -1,5 +1,11 @@
 # Proposal
 
+> **Superseded in part by `publish-project-documentation`.** The credential-injection half of this
+> change has been removed: a hosted copy of the application cannot work, because the provider only
+> returns the cross-origin header for registered origins and the available credential type cannot
+> register one. The publishing pipeline this change built is still in use — it now publishes
+> documentation and the planning artifacts instead of the app.
+
 ## Why
 
 The app only runs locally. Two things stop it being a public site at
