@@ -22,7 +22,14 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      # enablement: true creates the Pages site via the API. Without it the
+      # action 404s ("Get Pages site failed") on a repository where Pages has
+      # never been turned on, and someone has to set Settings -> Pages ->
+      # Source by hand first. Needs the pages: write permission declared above.
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
 
       # Publish an explicit allowlist. An exclude list would silently publish
       # any directory added later; this cannot.
