@@ -4,274 +4,128 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Prisjagt</title>
-<meta name="description" content="Se live nedsatte varer i supermarkeder i København på et kort.">
+<meta name="description" content="Se live nedsatte varer i supermarkeder i København.">
+<meta name="color-scheme" content="light">
 <link rel="stylesheet" href="vendor/leaflet.css">
-<style>
-  :root {
-    --bg: #ffffff;
-    --fg: #16191d;
-    --muted: #5d6673;
-    --line: #dfe3e8;
-    --card: #f6f7f9;
-    --accent: #0a6c3d;
-    --danger: #b3261e;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #15181c;
-      --fg: #e8eaed;
-      --muted: #9aa3af;
-      --line: #2c3139;
-      --card: #1d2127;
-      --accent: #4ec98a;
-      --danger: #ef9a93;
-    }
-  }
-  * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; }
-  body {
-    background: var(--bg);
-    color: var(--fg);
-    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    display: flex;
-    flex-direction: column;
-  }
-  a { color: var(--accent); }
-
-  header {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    flex-wrap: wrap;
-    padding: 10px 14px;
-    border-bottom: 1px solid var(--line);
-  }
-  header h1 { font-size: 17px; margin: 0; }
-  header .tag { color: var(--muted); font-size: 13px; }
-  header .spacer { flex: 1 1 auto; }
-  button {
-    font: inherit;
-    color: var(--fg);
-    background: var(--card);
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    padding: 5px 10px;
-    cursor: pointer;
-  }
-  button:hover { border-color: var(--accent); }
-  button[disabled] { opacity: .55; cursor: default; }
-  .linkbtn {
-    background: none;
-    border: none;
-    color: var(--muted);
-    text-decoration: underline;
-    padding: 5px 2px;
-  }
-
-  #layout { flex: 1 1 auto; display: flex; min-height: 0; }
-  #map { flex: 1 1 auto; min-height: 0; background: var(--card); }
-  #panel {
-    flex: 0 0 360px;
-    border-left: 1px solid var(--line);
-    overflow-y: auto;
-    padding: 14px;
-  }
-  @media (max-width: 700px) {
-    #layout { flex-direction: column; }
-    #map { flex: 0 0 55vh; }
-    #panel { flex: 1 1 auto; border-left: none; border-top: 1px solid var(--line); }
-  }
-
-  #gate {
-    max-width: 560px;
-    margin: 8vh auto;
-    padding: 0 18px;
-  }
-  #gate h2 { margin-top: 0; }
-  #gate ol { padding-left: 20px; color: var(--muted); }
-  #gate form { display: flex; gap: 8px; margin: 16px 0 8px; }
-  #gate input {
-    flex: 1 1 auto;
-    font: inherit;
-    padding: 7px 9px;
-    color: var(--fg);
-    background: var(--bg);
-    border: 1px solid var(--line);
-    border-radius: 6px;
-  }
-
-  .muted { color: var(--muted); }
-  .small { font-size: 13px; }
-  .err { color: var(--danger); }
-  .hidden { display: none !important; }
-
-  .panel-head h2 { font-size: 16px; margin: 0 0 2px; }
-  .panel-head .addr { color: var(--muted); font-size: 13px; }
-  .panel-head .row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
-
-  ul.offers { list-style: none; margin: 14px 0 0; padding: 0; }
-  ul.offers li {
-    display: flex;
-    gap: 10px;
-    align-items: flex-start;
-    padding: 10px 0;
-    border-top: 1px solid var(--line);
-  }
-  ul.offers img {
-    width: 48px;
-    height: 48px;
-    object-fit: contain;
-    border-radius: 4px;
-    background: var(--card);
-    flex: 0 0 auto;
-  }
-  .o-body { flex: 1 1 auto; min-width: 0; }
-  .o-name { font-weight: 600; }
-  .o-prices { margin-top: 2px; }
-  .o-new { font-weight: 700; }
-  .o-old { color: var(--muted); text-decoration: line-through; margin-left: 6px; }
-  .badge {
-    display: inline-block;
-    margin-left: 6px;
-    padding: 1px 6px;
-    border-radius: 999px;
-    font-size: 12px;
-    font-weight: 700;
-    color: #fff;
-    background: var(--danger);
-  }
-
-  footer {
-    padding: 8px 14px;
-    border-top: 1px solid var(--line);
-    color: var(--muted);
-    font-size: 12px;
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-    align-items: center;
-  }
-  #ean-form { display: flex; gap: 6px; }
-  #ean-input {
-    font: inherit;
-    width: 10em;
-    padding: 5px 8px;
-    color: var(--fg);
-    background: var(--bg);
-    border: 1px solid var(--line);
-    border-radius: 6px;
-  }
-  @media (max-width: 700px) {
-    header { gap: 6px; }
-    #ean-form { width: 100%; }
-    #ean-input { flex: 1 1 auto; width: auto; }
-  }
-
-  .product {
-    display: flex;
-    gap: 12px;
-    align-items: flex-start;
-    margin: 12px 0;
-  }
-  .product img {
-    width: 84px;
-    height: 84px;
-    object-fit: contain;
-    border-radius: 6px;
-    background: var(--card);
-    flex: 0 0 auto;
-  }
-  .product .p-price { font-size: 20px; font-weight: 700; }
-  .ean { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
-
-  .o-regular { margin-top: 3px; font-size: 13px; }
-  .o-disagree { color: var(--danger); font-weight: 600; }
-  .rowbtn {
-    margin-top: 4px;
-    padding: 2px 7px;
-    font-size: 12px;
-  }
-
-  #scan {
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-    background: rgba(0, 0, 0, .85);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .scan-box { text-align: center; color: #fff; padding: 14px; max-width: 94vw; }
-  #scan-video {
-    width: min(86vw, 520px);
-    max-height: 60vh;
-    border-radius: 10px;
-    background: #000;
-  }
-  #scan .small { color: #ddd; }
-
-  .budget:empty { display: none; }
-  .budget {
-    padding: 1px 7px;
-    border-radius: 999px;
-    background: var(--card);
-    border: 1px solid var(--line);
-  }
-  .budget.waiting { color: var(--danger); border-color: var(--danger); }
-
-  .leaflet-container { font: inherit; }
-</style>
+<link rel="stylesheet" href="vendor/tailwind.css">
 </head>
-<body>
+<body class="flex h-dvh flex-col bg-brand-wash text-ink antialiased">
 
-<section id="gate" class="hidden">
-  <h2>Prisjagt</h2>
-  <p>Se <strong>live nedsatte varer</strong> i Netto, føtex, Bilka og Salling i København på et kort.
-     Appen kører helt i din browser og har brug for din egen gratis API-nøgle fra Salling Group.</p>
-  <ol class="small">
-    <li>Opret en gratis konto på <a href="https://developer.sallinggroup.dev" target="_blank" rel="noopener noreferrer">developer.sallinggroup.dev</a>.</li>
-    <li>Opret en app med adgang til <em>Anti Food Waste</em> og <em>Stores</em>.</li>
-    <li>Kopier app-nøglen (bearer token) og indsæt den herunder.</li>
-  </ol>
-  <form id="gate-form">
-    <input id="gate-input" type="password" autocomplete="off" spellcheck="false"
-           placeholder="Indsæt din API-nøgle" aria-label="API-nøgle" required>
-    <button type="submit" id="gate-save">Gem</button>
-  </form>
-  <p id="gate-msg" class="small muted">Nøglen gemmes kun i din browser (localStorage) og sendes aldrig andre steder end til Salling Groups API.</p>
+<!-- credential gate -->
+<section id="gate" class="hidden flex-1 items-center justify-center p-4">
+  <div class="w-full max-w-xl rounded-2xl border border-brand-line bg-white p-7 shadow-sm">
+    <h1 class="text-2xl font-bold text-brand">Prisjagt</h1>
+    <p class="mt-2 text-muted">
+      Se <strong class="text-ink">live nedsatte varer</strong> i Netto, føtex, Bilka og Salling i
+      København. Appen kører helt i din browser og bruger din egen gratis API-nøgle.
+    </p>
+    <ol class="mt-4 list-decimal space-y-1 pl-5 text-sm text-muted">
+      <li>Opret en gratis konto på
+        <a class="font-medium text-brand underline" href="https://developer.sallinggroup.dev"
+           target="_blank" rel="noopener noreferrer">developer.sallinggroup.dev</a>.</li>
+      <li>Giv appen adgang til <em>Anti Food Waste</em> og <em>Stores</em>.</li>
+      <li>Tilføj denne sides adresse under <em>Origins</em> på nøglen.</li>
+      <li>Indsæt nøglen herunder.</li>
+    </ol>
+    <form id="gate-form" autocomplete="off" class="mt-5 flex gap-2">
+      <input id="gate-input" type="password" required spellcheck="false" aria-label="API-nøgle"
+             placeholder="Indsæt din API-nøgle"
+             class="min-w-0 flex-1 rounded-lg border border-brand-line bg-white px-3 py-2
+                    outline-none focus:border-brand focus:ring-2 focus:ring-brand-line">
+      <button type="submit" id="gate-save"
+              class="rounded-lg bg-brand px-5 py-2 font-medium text-white hover:bg-brand-dark
+                     disabled:opacity-60">Gem</button>
+    </form>
+    <p id="gate-msg" class="mt-3 text-sm text-muted">
+      Nøglen gemmes kun i din browser og sendes kun til Salling Groups API.
+    </p>
+  </div>
 </section>
 
-<header id="app-head" class="hidden">
-  <h1>Prisjagt</h1>
-  <span class="tag">Live nedsatte varer i København</span>
-  <span class="spacer"></span>
-  <form id="ean-form" autocomplete="off">
-    <input id="ean-input" type="text" inputmode="numeric" pattern="[0-9 ]*" spellcheck="false"
-           placeholder="Stregkode (EAN)" aria-label="Stregkode">
-    <button type="submit">Slå op</button>
-    <button type="button" id="ean-scan" class="hidden" title="Scan stregkode">Scan</button>
-  </form>
-  <button type="button" id="locate">Find mig</button>
-  <button type="button" id="reload-stores">Opdatér butikker</button>
+<!-- header -->
+<header id="app-head" class="hidden border-b border-brand-line bg-white">
+  <div class="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5">
+    <h1 class="text-lg font-bold text-brand">Prisjagt</h1>
+    <span class="hidden text-sm text-muted sm:inline">Live nedsatte varer i København</span>
+    <form id="ean-form" autocomplete="off" class="ml-auto flex gap-2">
+      <input id="ean-input" type="text" inputmode="numeric" pattern="[0-9 ]*" spellcheck="false"
+             placeholder="Stregkode (EAN)" aria-label="Stregkode"
+             class="w-40 rounded-lg border border-brand-line bg-white px-3 py-1.5 text-sm
+                    outline-none focus:border-brand focus:ring-2 focus:ring-brand-line">
+      <button type="submit"
+              class="rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white
+                     hover:bg-brand-dark">Slå op</button>
+      <button type="button" id="ean-scan" title="Scan stregkode"
+              class="hidden rounded-lg border border-brand-line px-3 py-1.5 text-sm
+                     hover:border-brand">Scan</button>
+    </form>
+  </div>
+
+  <!-- controls: filter chip + sorting -->
+  <div class="flex flex-wrap items-center gap-2 border-t border-brand-line/70 px-4 py-2">
+    <button type="button" id="map-toggle"
+            class="rounded-lg border border-brand-line px-3 py-1.5 text-sm hover:border-brand lg:hidden">
+      Kort
+    </button>
+    <span id="filter-chip" class="hidden items-center gap-2 rounded-full bg-brand-soft px-3 py-1
+                                  text-sm font-medium text-brand"></span>
+    <span id="offer-count" class="text-sm text-muted"></span>
+    <label class="ml-auto flex items-center gap-2 text-sm text-muted">
+      Sortér
+      <select id="sort"
+              class="rounded-lg border border-brand-line bg-white px-2 py-1.5 text-sm text-ink
+                     outline-none focus:border-brand">
+        <option value="discount">Største rabat</option>
+        <option value="price">Laveste pris</option>
+        <option value="name">Navn</option>
+      </select>
+    </label>
+    <button type="button" id="locate"
+            class="rounded-lg border border-brand-line px-3 py-1.5 text-sm hover:border-brand">
+      Find mig</button>
+    <button type="button" id="reload-stores"
+            class="rounded-lg border border-brand-line px-3 py-1.5 text-sm hover:border-brand">
+      Opdatér</button>
+  </div>
 </header>
 
-<div id="layout" class="hidden">
-  <div id="map"></div>
-  <aside id="panel" aria-live="polite"></aside>
+<!-- main: map is secondary, products take the majority -->
+<main id="layout" class="hidden min-h-0 flex-1">
+  <div class="grid h-full min-h-0 grid-rows-[minmax(0,1fr)] lg:grid-cols-5">
+    <div id="map-pane" class="hidden border-r border-brand-line lg:col-span-2 lg:block">
+      <div id="map" class="h-full w-full bg-brand-soft"></div>
+    </div>
+    <section id="products" class="min-h-0 overflow-y-auto p-3 lg:col-span-3"></section>
+  </div>
+</main>
+
+<!-- mobile map overlay -->
+<div id="map-overlay" class="fixed inset-0 z-[900] hidden flex-col bg-white">
+  <div class="flex items-center justify-between border-b border-brand-line px-4 py-2">
+    <span class="font-semibold text-brand">Vælg butik</span>
+    <button type="button" id="map-close"
+            class="rounded-lg border border-brand-line px-3 py-1.5 text-sm">Luk</button>
+  </div>
+  <div id="map-overlay-slot" class="min-h-0 flex-1"></div>
 </div>
 
-<footer id="app-foot" class="hidden">
+<footer id="app-foot"
+        class="hidden flex-wrap items-center gap-x-3 gap-y-1 border-t border-brand-line bg-white
+               px-4 py-2 text-xs text-muted">
   <span>Data: Salling Group API · Kort: © OpenStreetMap-bidragydere · Leaflet</span>
-  <span id="budget" class="budget"></span>
-  <span class="spacer" style="flex:1 1 auto"></span>
-  <button type="button" class="linkbtn" id="forget">Glem min API-nøgle</button>
+  <span id="budget" class="hidden rounded-full border border-deal px-2 py-0.5 font-medium text-deal"></span>
+  <button type="button" id="forget" class="ml-auto underline hover:text-ink">Glem min API-nøgle</button>
 </footer>
 
-<div id="scan" class="hidden" role="dialog" aria-label="Scan stregkode">
-  <div class="scan-box">
-    <video id="scan-video" playsinline muted></video>
-    <p id="scan-msg" class="small">Hold stregkoden foran kameraet…</p>
-    <button type="button" id="scan-cancel">Annullér</button>
+<!-- barcode scanner -->
+<div id="scan" class="fixed inset-0 z-[1000] hidden items-center justify-center bg-black/85 p-4">
+  <div class="text-center">
+    <video id="scan-video" playsinline muted
+           class="max-h-[60vh] w-[min(86vw,520px)] rounded-xl bg-black"></video>
+    <p id="scan-msg" class="mt-3 text-sm text-white/80">Hold stregkoden foran kameraet…</p>
+    <button type="button" id="scan-cancel"
+            class="mt-3 rounded-lg border border-white/40 px-4 py-2 text-sm text-white">
+      Annullér</button>
   </div>
 </div>
 

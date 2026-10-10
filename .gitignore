@@ -1,0 +1,6 @@
+node_modules/
+.DS_Store
+*.log
+
+# vendor/tailwind.css is generated but IS committed - the deployed site needs it
+# and there is no build step at deploy time.

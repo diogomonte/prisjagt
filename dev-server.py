@@ -20,7 +20,9 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 UPSTREAM = 'https://api.sallinggroup.com'
 PREFIX = '/api/'
-PASS_THROUGH = ('content-type', 'x-trace-id')
+# retry-after matters: the app clamps it to decide the cooldown, so local
+# testing must see the same header production would.
+PASS_THROUGH = ('content-type', 'x-trace-id', 'retry-after')
 
 
 class DevHandler(SimpleHTTPRequestHandler):

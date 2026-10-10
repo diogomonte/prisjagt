@@ -23,6 +23,10 @@
   var map = null;
   var markers = null;
   var offerCache = new Map();
+  var allOffers = [];          // flat model: every loaded offer, store attached
+  var storeById = {};
+  var storeFilter = null;      // store id, or null for "everything nearby"
+  var sortMode = 'discount';
   var selected = null;        // id of the store whose panel is open
   var selectedStore = null;   // the store object itself, for lookups
 
@@ -444,21 +448,24 @@
 
   function showGate(message, isError) {
     el('gate').classList.remove('hidden');
+    el('gate').classList.add('flex');
     ['app-head', 'layout', 'app-foot'].forEach(function (id) {
       el(id).classList.add('hidden');
     });
     if (message) {
       var m = el('gate-msg');
       m.textContent = message;
-      m.className = 'small ' + (isError ? 'err' : 'muted');
+      m.className = 'mt-3 text-sm ' + (isError ? 'font-medium text-deal' : 'text-muted');
     }
   }
 
   function showApp() {
     el('gate').classList.add('hidden');
+    el('gate').classList.remove('flex');
     ['app-head', 'layout', 'app-foot'].forEach(function (id) {
       el(id).classList.remove('hidden');
     });
+    el('app-foot').classList.add('flex');
   }
 
   function forgetToken(message) {
@@ -544,6 +551,7 @@
   function drawStores(stores) {
     markers.clearLayers();
     stores.forEach(function (store) {
+      storeById[store.id] = store;
       // Salling returns coordinates as [longitude, latitude].
       var m = L.circleMarker([store.coordinates[1], store.coordinates[0]], {
         radius: 7,
@@ -553,7 +561,10 @@
         fillOpacity: 0.95
       });
       m.bindTooltip(store.name || store.brand);
-      m.on('click', function () { selectStore(store); });
+      m.on('click', function () {
+        selectStore(store);
+        if (!el('map-overlay').classList.contains('hidden')) closeMapOverlay();
+      });
       m.addTo(markers);
     });
   }
@@ -576,82 +587,108 @@
     var line = [addr.street, [addr.zip, addr.city].filter(Boolean).join(' ')]
       .filter(Boolean).join(', ');
     var head = document.createElement('div');
-    head.className = 'panel-head';
+    head.className = 'mb-3';
 
     var h = document.createElement('h2');
+    h.className = 'text-lg font-bold text-ink';
     h.textContent = store.name || store.brand;
     head.appendChild(h);
 
     if (line) {
-      var a = document.createElement('div');
-      a.className = 'addr';
+      var a = document.createElement('p');
+      a.className = 'text-sm text-muted';
       a.textContent = line;
       head.appendChild(a);
     }
-
-    var note = document.createElement('p');
-    note.className = 'small muted';
-    note.textContent = 'Viser live nedsatte varer (datovarer) fra Salling Groups API — ikke almindelige hyldepriser.';
-    head.appendChild(note);
-
     if (extra) head.appendChild(extra);
     return head;
   }
 
-  function offerRow(item, storeId) {
+  var CARD = 'group relative flex h-full flex-col overflow-hidden rounded-xl border ' +
+    'border-brand-line bg-white shadow-sm transition hover:shadow-md';
+
+  function offerCard(item) {
     var offer = item.offer || {};
     var product = item.product || {};
-    var li = document.createElement('li');
+    var storeId = item.storeId;
+    var store = storeById[storeId];
 
+    var card = document.createElement('article');
+    card.className = CARD;
+
+    var pct = offer.percentDiscount
+      ? '-' + Math.round(offer.percentDiscount) + '%'
+      : null;
+
+    // The image block is only drawn when there is an image; otherwise an empty
+    // square would dominate the card. The badge then moves inline.
     if (product.image) {
+      var figure = document.createElement('div');
+      figure.className = 'relative h-36 shrink-0 bg-brand-wash';
       var img = document.createElement('img');
       img.src = product.image;
       img.alt = '';
       img.loading = 'lazy';
-      img.onerror = function () { img.remove(); };
-      li.appendChild(img);
+      img.className = 'h-full w-full object-contain p-2';
+      img.onerror = function () {
+        img.remove();
+        figure.className = 'relative h-8 shrink-0 bg-brand-wash';  // collapse, keep badge
+      };
+      figure.appendChild(img);
+      if (pct) {
+        var badge = document.createElement('span');
+        badge.className = 'absolute right-2 top-2 rounded-full bg-deal px-2 py-0.5 ' +
+          'text-xs font-bold text-white shadow';
+        badge.textContent = pct;
+        figure.appendChild(badge);
+      }
+      card.appendChild(figure);
     }
 
     var body = document.createElement('div');
-    body.className = 'o-body';
+    body.className = 'flex flex-1 flex-col gap-1 p-3';
 
-    var name = document.createElement('div');
-    name.className = 'o-name';
+    var head = document.createElement('div');
+    head.className = 'flex items-start justify-between gap-2';
+    var name = document.createElement('h3');
+    name.className = 'line-clamp-2 text-sm font-semibold text-ink';
     name.textContent = product.description || 'Ukendt vare';
-    body.appendChild(name);
+    head.appendChild(name);
+    if (pct && !product.image) {
+      var inlineBadge = document.createElement('span');
+      inlineBadge.className = 'shrink-0 rounded-full bg-deal px-2 py-0.5 text-xs ' +
+        'font-bold text-white';
+      inlineBadge.textContent = pct;
+      head.appendChild(inlineBadge);
+    }
+    body.appendChild(head);
 
     var prices = document.createElement('div');
-    prices.className = 'o-prices';
+    prices.className = 'mt-auto flex items-baseline gap-2';
     var now = document.createElement('span');
-    now.className = 'o-new';
+    now.className = 'text-xl font-bold text-brand';
     now.textContent = kr(offer.newPrice);
     prices.appendChild(now);
-
     if (offer.originalPrice > offer.newPrice) {
       var was = document.createElement('span');
-      was.className = 'o-old';
+      was.className = 'text-sm text-muted line-through';
       was.textContent = kr(offer.originalPrice);
       prices.appendChild(was);
     }
-    if (offer.percentDiscount) {
-      var badge = document.createElement('span');
-      badge.className = 'badge';
-      badge.textContent = '-' + Math.round(offer.percentDiscount) + '%';
-      prices.appendChild(badge);
-    }
     body.appendChild(prices);
 
-    if (offer.stock) {
-      var stock = document.createElement('div');
-      stock.className = 'small muted';
-      stock.textContent = offer.stock + ' ' + (offer.stockUnit === 'kg' ? 'kg' : 'stk.') + ' tilbage';
-      body.appendChild(stock);
-    }
+    var meta = document.createElement('p');
+    meta.className = 'text-xs text-muted';
+    var bits = [];
+    if (store) bits.push(store.name || store.brand);
+    if (offer.stock) bits.push(offer.stock + ' ' + (offer.stockUnit === 'kg' ? 'kg' : 'stk.'));
+    meta.textContent = bits.join(' · ');
+    body.appendChild(meta);
 
-    if (product.ean && validEan(product.ean)) {
+    if (product.ean && validEan(product.ean) && storeId) {
       var compare = document.createElement('button');
       compare.type = 'button';
-      compare.className = 'rowbtn';
+      compare.className = 'self-start text-xs font-medium text-brand underline hover:text-brand-dark';
       compare.textContent = 'tjek normalpris';
       compare.onclick = function () {
         compare.disabled = true;
@@ -668,8 +705,8 @@
             }
             compare.disabled = false;
             compare.textContent = 'tjek normalpris';
-            var msg = document.createElement('div');
-            msg.className = 'small err';
+            var msg = document.createElement('p');
+            msg.className = 'text-xs font-medium text-deal';
             msg.textContent = err.statusCode === 403
               ? 'API-nøglen mangler adgang til Products EAN.'
               : describeLookup(err);
@@ -679,17 +716,17 @@
       body.appendChild(compare);
     }
 
-    li.appendChild(body);
-    return li;
+    card.appendChild(body);
+    return card;
   }
 
   // Shows the catalogue's regular price next to a clearance offer, and flags
   // the case where the offer's reported originalPrice disagrees with it.
   function regularPriceLine(found, offer) {
-    var line = document.createElement('div');
-    line.className = 'o-regular';
+    var line = document.createElement('p');
+    line.className = 'text-xs';
     if (found.price === null) {
-      line.className += ' muted';
+      line.className = 'text-xs text-muted';
       line.textContent = 'Normalpris ikke tilgængelig';
       return line;
     }
@@ -697,7 +734,7 @@
     var reported = Number(offer.originalPrice);
     var disagrees = isFinite(reported) && Math.abs(reported - found.price) > 1;
     if (disagrees) {
-      line.className += ' o-disagree';
+      line.className = 'text-xs font-semibold text-deal';
       line.textContent = 'Normalpris ' + kr(found.price) +
         ' — tilbuddet oplyser ' + kr(reported);
     } else {
@@ -712,70 +749,112 @@
     return pad(d.getHours()) + ':' + pad(d.getMinutes());
   }
 
-  function renderOffers(store, data, meta) {
-    var panel = el('panel');
-    panel.textContent = '';
+  /* ---------- the offer grid ---------- */
+
+  // One flat list of every loaded offer keeps filtering by store, sorting
+  // across stores and labelling each card with its store trivial; the nested
+  // per-store response makes each of those a special case.
+  function mergeOffers(storeId, data) {
+    var rows = (data && data.clearances) || [];
+    allOffers = allOffers.filter(function (o) { return o.storeId !== storeId; });
+    for (var i = 0; i < rows.length; i++) {
+      allOffers.push({ storeId: storeId, offer: rows[i].offer, product: rows[i].product });
+    }
+  }
+
+  function sortedOffers(list) {
+    var copy = list.slice();
+    if (sortMode === 'price') {
+      copy.sort(function (a, b) { return (a.offer.newPrice || 0) - (b.offer.newPrice || 0); });
+    } else if (sortMode === 'name') {
+      copy.sort(function (a, b) {
+        return String(a.product.description || '').localeCompare(String(b.product.description || ''), 'da');
+      });
+    } else {
+      copy.sort(function (a, b) {
+        return (b.offer.percentDiscount || 0) - (a.offer.percentDiscount || 0);
+      });
+    }
+    return copy;
+  }
+
+  function visibleOffers() {
+    if (!storeFilter) return sortedOffers(allOffers);
+    return sortedOffers(allOffers.filter(function (o) { return o.storeId === storeFilter; }));
+  }
+
+  function renderFilterChip() {
+    var chip = el('filter-chip');
+    if (!storeFilter) {
+      chip.classList.add('hidden');
+      chip.classList.remove('inline-flex');
+      chip.textContent = '';
+      return;
+    }
+    var store = storeById[storeFilter] || {};
+    chip.textContent = '';
+    chip.classList.remove('hidden');
+    chip.classList.add('inline-flex');
+    var label = document.createElement('span');
+    label.textContent = storeLabel(store);
+    chip.appendChild(label);
+    var clear = document.createElement('button');
+    clear.type = 'button';
+    clear.setAttribute('aria-label', 'Ryd filter');
+    clear.className = 'font-bold text-brand hover:text-brand-dark';
+    clear.textContent = '×';
+    clear.onclick = function () { setStoreFilter(null); };
+    chip.appendChild(clear);
+  }
+
+  function setStoreFilter(storeId) {
+    storeFilter = storeId || null;
+    selected = storeFilter;
+    renderGrid();
+  }
+
+  function gridNote(text, tone) {
+    var p = document.createElement('p');
+    // Not a grid child: auto-rows-fr would give a one-line note a full row.
+    p.className = 'mb-3 text-sm ' + (tone === 'err' ? 'font-medium text-deal' : 'text-muted');
+    p.textContent = text;
+    return p;
+  }
+
+  function renderGrid(meta) {
     meta = meta || {};
+    var products = el('products');
+    products.textContent = '';
+    renderFilterChip();
 
-    var refresh = document.createElement('div');
-    refresh.className = 'row';
-    var btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = 'Opdatér';
-    btn.onclick = function () {
-      var waiting = Math.ceil(cooldownRemaining() / 1000);
-      if (waiting > 0) {
-        setStatus('For mange forespørgsler — venter ' + waiting + ' s');
-        return;
-      }
-      offerCache.delete(store.id);
-      selectStore(store, true);
-    };
-    refresh.appendChild(btn);
+    var items = visibleOffers();
+    el('offer-count').textContent = items.length
+      ? items.length + ' nedsatte varer' + (storeFilter ? ' i denne butik' : ' i nærheden')
+      : '';
 
-    // Cached data must never be presented as live.
     if (meta.at) {
-      var stamp = document.createElement('span');
-      stamp.className = 'small muted';
-      stamp.textContent = 'Opdateret kl. ' + clockTime(meta.at) +
-        (meta.refreshing ? ' · opdaterer…' : '');
-      refresh.appendChild(stamp);
+      products.appendChild(gridNote('Opdateret kl. ' + clockTime(meta.at) +
+        (meta.refreshing ? ' · opdaterer…' : '')));
     }
-    panel.appendChild(panelHead(store, refresh));
-
     if (meta.refreshError) {
-      var warn = document.createElement('p');
-      warn.className = 'small err';
-      warn.textContent = 'Kunne ikke opdatere — viser gemte priser. ' + meta.refreshError;
-      panel.appendChild(warn);
+      products.appendChild(gridNote('Kunne ikke opdatere — viser gemte priser. ' + meta.refreshError, 'err'));
     }
 
-    var items = (data && data.clearances) || [];
     if (!items.length) {
-      var empty = document.createElement('p');
-      empty.className = 'muted';
-      empty.textContent = 'Ingen nedsatte varer lige nu.';
-      panel.appendChild(empty);
+      products.appendChild(gridNote(storeFilter
+        ? 'Ingen nedsatte varer i denne butik lige nu.'
+        : 'Ingen nedsatte varer i nærheden lige nu.'));
       return;
     }
 
-    var count = document.createElement('p');
-    count.className = 'small muted';
-    count.textContent = items.length + ' nedsatte varer';
-    panel.appendChild(count);
-
-    var list = document.createElement('ul');
-    list.className = 'offers';
-    items.slice().sort(function (a, b) {
-      return ((b.offer && b.offer.percentDiscount) || 0) - ((a.offer && a.offer.percentDiscount) || 0);
-    }).forEach(function (item) {
-      list.appendChild(offerRow(item, store.id));
-    });
-    panel.appendChild(list);
+    var grid = document.createElement('div');
+    grid.className = 'grid auto-rows-fr grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4';
+    for (var i = 0; i < items.length; i++) grid.appendChild(offerCard(items[i]));
+    products.appendChild(grid);
   }
 
   function panelMessage(node) {
-    var panel = el('panel');
+    var panel = el('products');
     panel.textContent = '';
     panel.appendChild(node);
   }
@@ -783,12 +862,13 @@
   function panelError(message, retry) {
     var wrap = document.createElement('div');
     var p = document.createElement('p');
-    p.className = 'err';
+    p.className = 'text-sm font-medium text-deal';
     p.textContent = message;
     wrap.appendChild(p);
     if (retry) {
       var btn = document.createElement('button');
       btn.type = 'button';
+      btn.className = 'mt-2 rounded-lg border border-brand-line px-3 py-1.5 text-sm hover:border-brand';
       btn.textContent = 'Prøv igen';
       btn.onclick = retry;
       wrap.appendChild(btn);
@@ -796,79 +876,75 @@
     panelMessage(wrap);
   }
 
-  function fetchClearances(store, meta) {
+  function fetchClearances(store) {
     return sgFetch('/v1/food-waste/' + encodeURIComponent(store.id))
       .then(function (data) {
         var trimmed = trimClearances(data);
         storeClearances(store.id, data);
         offerCache.set(store.id, { data: trimmed, at: now() });
+        mergeOffers(store.id, trimmed);
         return trimmed;
       });
   }
 
-  // Three tiers: the in-memory map (no parse), then localStorage (no request),
-  // then the network. Cached data is rendered immediately even when stale, and
-  // refreshed behind it - a refresh must never blank out usable prices.
-  function selectStore(store, force) {
-    selected = store.id;
-    selectedStore = store;
-
-    var memory = offerCache.get(store.id);
-    var cached = null;
-    if (!force && memory) {
-      cached = { data: memory.data, at: memory.at, stale: now() - memory.at > TTL.clearances };
-    } else if (!force) {
-      var stored = cachedClearances(store.id);
-      if (stored) {
-        cached = { data: stored.data, at: stored.at, stale: stored.stale };
-        offerCache.set(store.id, { data: stored.data, at: stored.at });
-      }
-    }
-
-    if (cached) {
-      var needsRefresh = cached.stale && cooldownRemaining() === 0;
-      renderOffers(store, cached.data, { at: cached.at, refreshing: needsRefresh });
-      if (!needsRefresh) return;
-
-      fetchClearances(store).then(function (fresh) {
-        if (selected !== store.id) return;
-        renderOffers(store, fresh, { at: now(), refreshing: false });
-      }, function (err) {
-        if (err.statusCode === 401) { forgetToken('Nøglen er ikke længere gyldig. Indsæt en ny.'); return; }
-        if (selected !== store.id) return;
-        // Keep the data that is already on screen; only report the failure.
-        renderOffers(store, cached.data, {
-          at: cached.at,
-          refreshing: false,
-          refreshError: describe(err)
-        });
+  // One request returns every nearby store's offers. Filling the same grid
+  // store-by-store would be ~16 requests, which is both slower to display and
+  // the burst pattern the API blocks by IP.
+  function fetchNearbyOffers() {
+    return sgFetch('/v1/food-waste/?geo=' + CPH[0] + ',' + CPH[1] + '&radius=' + RADIUS_KM)
+      .then(function (data) {
+        var entries = Array.isArray(data) ? data : [];
+        for (var i = 0; i < entries.length; i++) {
+          var store = entries[i].store || {};
+          if (!store.id) continue;
+          var trimmed = trimClearances(entries[i]);
+          // Write through the per-store cache so a later single-store refresh
+          // stays consistent with what the grid shows.
+          storeClearances(store.id, entries[i]);
+          offerCache.set(store.id, { data: trimmed, at: now() });
+          if (!storeById[store.id]) storeById[store.id] = store;
+          mergeOffers(store.id, trimmed);
+        }
+        return entries.length;
       });
+  }
+
+  // Everything nearby is already loaded, so selecting a store is a filter over
+  // the model - no request at all. A store outside the bulk set is fetched on
+  // demand, through the same cache.
+  function selectStore(store, force) {
+    selectedStore = store;
+    storeById[store.id] = store;
+
+    var known = allOffers.some(function (o) { return o.storeId === store.id; });
+    var cached = offerCache.get(store.id);
+    if (!force && (known || cached)) {
+      if (!known && cached) mergeOffers(store.id, cached.data);
+      setStoreFilter(store.id);
       return;
     }
 
-    var loading = document.createElement('div');
-    loading.appendChild(panelHead(store));
-    var p = document.createElement('p');
-    p.className = 'muted';
-    p.textContent = 'Henter nedsatte varer…';
-    loading.appendChild(p);
-    panelMessage(loading);
+    storeFilter = store.id;
+    selected = store.id;
+    renderFilterChip();
+    panelMessage(gridNote('Henter nedsatte varer…'));
 
     fetchClearances(store)
-      .then(function (data) {
-        if (selected === store.id) renderOffers(store, data, { at: now(), refreshing: false });
+      .then(function () {
+        if (storeFilter === store.id) renderGrid({ at: now() });
       })
       .catch(function (err) {
         if (err.statusCode === 401) { forgetToken('Nøglen er ikke længere gyldig. Indsæt en ny.'); return; }
-        if (selected !== store.id) return;
+        if (storeFilter !== store.id) return;
         if (err.statusCode === 404) {
           var empty = { clearances: [] };
           storeClearances(store.id, empty);
           offerCache.set(store.id, { data: empty, at: now() });
-          renderOffers(store, empty, { at: now(), refreshing: false });
+          mergeOffers(store.id, empty);
+          renderGrid({ at: now() });
           return;
         }
-        panelError(describe(err), function () { selectStore(store); });
+        panelError(describe(err), function () { selectStore(store, true); });
       });
   }
 
@@ -884,7 +960,7 @@
 
   function priceNote() {
     var note = document.createElement('p');
-    note.className = 'small muted';
+    note.className = 'mt-3 text-xs text-muted';
     note.textContent = 'Normalpris i fysiske butikker fra Salling Groups API. ' +
       'Priser kan afvige fra hylden. Data stilles til rådighed til undervisningsbrug ' +
       'og ikke-kommerciel brug.';
@@ -893,10 +969,11 @@
 
   function scopeHelp() {
     var wrap = document.createElement('p');
-    wrap.className = 'err';
+    wrap.className = 'text-sm font-medium text-deal';
     wrap.appendChild(document.createTextNode(
       'Din API-nøgle mangler adgang til Products EAN. Anmod om adgang på '));
     var link = document.createElement('a');
+    link.className = 'underline';
     link.href = PORTAL;
     link.target = '_blank';
     link.rel = 'noopener noreferrer';
@@ -907,53 +984,49 @@
   }
 
   function renderProduct(product, store) {
-    var panel = el('panel');
-    panel.textContent = '';
+    var products = el('products');
+    products.textContent = '';
 
-    var head = document.createElement('div');
-    head.className = 'panel-head';
+    var back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'mb-3 text-sm font-medium text-brand underline hover:text-brand-dark';
+    back.textContent = '← Tilbage til tilbud';
+    back.onclick = function () { renderGrid(); };
+    products.appendChild(back);
+
+    var card = document.createElement('article');
+    card.className = 'max-w-md rounded-xl border border-brand-line bg-white p-5 shadow-sm';
+
     var h = document.createElement('h2');
+    h.className = 'text-lg font-bold text-ink';
     h.textContent = product.name || 'Ukendt vare';
-    head.appendChild(h);
-    var ean = document.createElement('div');
-    ean.className = 'ean';
+    card.appendChild(h);
+
+    var ean = document.createElement('p');
+    ean.className = 'text-sm tabular-nums text-muted';
     ean.textContent = 'EAN ' + product.ean;
-    head.appendChild(ean);
+    card.appendChild(ean);
 
-    // A price is only true for the store it was looked up in, so name it.
-    var where = document.createElement('div');
-    where.className = 'addr';
+    var where = document.createElement('p');
+    where.className = 'text-sm text-muted';
     where.textContent = 'Pris i ' + storeLabel(store);
-    head.appendChild(where);
-    panel.appendChild(head);
+    card.appendChild(where);
 
-    var row = document.createElement('div');
-    row.className = 'product';
-    if (product.image) {
-      var img = document.createElement('img');
-      img.src = product.image;
-      img.alt = '';
-      img.loading = 'lazy';
-      img.onerror = function () { img.remove(); };
-      row.appendChild(img);
-    }
-    var body = document.createElement('div');
-    var price = document.createElement('div');
+    var price = document.createElement('p');
     if (product.available === false) {
-      price.className = 'muted';
+      price.className = 'mt-3 text-muted';
       price.textContent = 'Varen findes ikke i de fysiske butikker.';
     } else if (product.price === null) {
-      price.className = 'muted';
+      price.className = 'mt-3 text-muted';
       price.textContent = 'Pris ikke tilgængelig';
     } else {
-      price.className = 'p-price';
+      price.className = 'mt-3 text-3xl font-bold text-brand';
       price.textContent = kr(product.price);
     }
-    body.appendChild(price);
-    row.appendChild(body);
-    panel.appendChild(row);
+    card.appendChild(price);
 
-    panel.appendChild(priceNote());
+    card.appendChild(priceNote());
+    products.appendChild(card);
   }
 
   function renderLookupError(err, retry) {
@@ -967,14 +1040,14 @@
     }
     if (err && err.noStore) {
       var ask = document.createElement('p');
-      ask.className = 'muted';
+      ask.className = 'text-sm text-muted';
       ask.textContent = describeLookup(err);
       panelMessage(ask);
       return;
     }
     if (err && (err.invalidEan || err.notFound)) {
       var p = document.createElement('p');
-      p.className = 'err';
+      p.className = 'text-sm font-medium text-deal';
       p.textContent = describeLookup(err);
       panelMessage(p);
       return;
@@ -996,7 +1069,7 @@
     }
 
     var loading = document.createElement('p');
-    loading.className = 'muted';
+    loading.className = 'text-sm text-muted';
     loading.textContent = 'Slår ' + ean + ' op i ' + storeLabel(store) + '…';
     panelMessage(loading);
 
@@ -1027,12 +1100,13 @@
     video.pause();
     video.srcObject = null;
     el('scan').classList.add('hidden');
+    el('scan').classList.remove('flex');
   }
 
   function scanFail(message) {
     scanTeardown();
     var p = document.createElement('p');
-    p.className = 'err';
+    p.className = 'text-sm font-medium text-deal';
     p.textContent = message;
     panelMessage(p);
     el('ean-input').focus();
@@ -1044,6 +1118,7 @@
     var video = el('scan-video');
     el('scan-msg').textContent = 'Hold stregkoden foran kameraet…';
     overlay.classList.remove('hidden');
+    overlay.classList.add('flex');
 
     var detector = new window.BarcodeDetector({
       formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'itf']
@@ -1085,11 +1160,19 @@
 
   var statusTimer = null;
 
+  var BUDGET_BASE = 'rounded-full border px-2 py-0.5 font-medium';
+
   function setStatus(text, waiting) {
     var node = el('budget');
     if (!node) return;
     node.textContent = text || '';
-    node.className = 'budget' + (waiting ? ' waiting' : '');
+    if (!text) {
+      node.className = BUDGET_BASE + ' hidden border-brand-line text-muted';
+      return;
+    }
+    node.className = BUDGET_BASE + (waiting
+      ? ' border-deal text-deal'
+      : ' border-brand-line text-muted');
   }
 
   // Shows the cooldown counting down, so a paused app never looks broken.
@@ -1109,11 +1192,33 @@
 
   /* ---------- boot ---------- */
 
-  function hint(text) {
-    var p = document.createElement('p');
-    p.className = 'muted';
-    p.textContent = text;
-    panelMessage(p);
+  function loadOffers(force) {
+    // Rebuild the model from whatever is already cached, so a reload paints
+    // without a request; only fetch when nothing usable is cached.
+    var warmed = 0;
+    if (!force) {
+      var ids = Object.keys(storeById);
+      for (var i = 0; i < ids.length; i++) {
+        var hit = cachedClearances(ids[i]);
+        if (hit && !hit.stale) {
+          offerCache.set(ids[i], { data: hit.data, at: hit.at });
+          mergeOffers(ids[i], hit.data);
+          warmed++;
+        }
+      }
+    }
+    if (warmed) {
+      renderGrid({ at: now() });
+      return Promise.resolve();
+    }
+
+    panelMessage(gridNote('Henter tilbud i nærheden…'));
+    return fetchNearbyOffers()
+      .then(function () { renderGrid({ at: now() }); })
+      .catch(function (err) {
+        if (err.statusCode === 401) { forgetToken('Nøglen er ikke længere gyldig. Indsæt en ny.'); return; }
+        panelError(describe(err), function () { loadOffers(true); });
+      });
   }
 
   function boot(force) {
@@ -1123,25 +1228,49 @@
     var cached = force ? null : cachedStores();
     if (cached && cached.length) {
       drawStores(cached);
-      hint('Vælg en butik på kortet for at se nedsatte varer og slå stregkoder op.');
+      loadOffers(force);
       return;
     }
 
-    hint('Henter butikker…');
+    panelMessage(gridNote('Henter butikker…'));
     fetchStores()
       .then(function (stores) {
         drawStores(stores);
         if (!stores.length) {
-          hint('Fandt ingen butikker i området.');
-        } else {
-          hint('Vælg en butik på kortet for at se nedsatte varer og slå stregkoder op. ' +
-            stores.length + ' butikker fundet.');
+          panelMessage(gridNote('Fandt ingen butikker i området.'));
+          return;
         }
+        loadOffers(force);
       })
       .catch(function (err) {
         if (err.statusCode === 401) { forgetToken('Nøglen er ikke længere gyldig. Indsæt en ny.'); return; }
         panelError(describe(err), function () { boot(force); });
       });
+  }
+
+  /* ---------- mobile map overlay ---------- */
+
+  // Leaflet caches the container size and paints grey tiles if it is resized
+  // without being told, so every move of the map element re-measures it.
+  function moveMap(toOverlay) {
+    var target = toOverlay ? el('map-overlay-slot') : el('map-pane');
+    var node = el('map');
+    if (node.parentNode !== target) target.appendChild(node);
+    if (map) setTimeout(function () { map.invalidateSize(); }, 0);
+  }
+
+  function openMapOverlay() {
+    var overlay = el('map-overlay');
+    overlay.classList.remove('hidden');
+    overlay.classList.add('flex');
+    moveMap(true);
+  }
+
+  function closeMapOverlay() {
+    var overlay = el('map-overlay');
+    overlay.classList.add('hidden');
+    overlay.classList.remove('flex');
+    moveMap(false);
   }
 
   onBudgetChange = renderBudget;
@@ -1160,7 +1289,27 @@
   }
   el('forget').addEventListener('click', function () { forgetToken(); });
   el('locate').addEventListener('click', locate);
-  el('reload-stores').addEventListener('click', function () { boot(true); });
+  el('reload-stores').addEventListener('click', function () {
+    allOffers = [];
+    offerCache.clear();
+    boot(true);
+  });
+  el('sort').addEventListener('change', function (ev) {
+    sortMode = ev.target.value;        // ordering survives a filter change
+    renderGrid();
+  });
+  el('map-toggle').addEventListener('click', openMapOverlay);
+  el('map-close').addEventListener('click', closeMapOverlay);
+
+  // Leaving the narrow breakpoint must return the map to its column.
+  var wide = window.matchMedia('(min-width: 1024px)');
+  var syncMap = function () {
+    if (wide.matches) closeMapOverlay();
+    if (map) map.invalidateSize();
+  };
+  if (wide.addEventListener) wide.addEventListener('change', syncMap);
+  else if (wide.addListener) wide.addListener(syncMap);
+  window.addEventListener('resize', function () { if (map) map.invalidateSize(); });
 
   if (token()) {
     showApp();

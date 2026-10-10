@@ -47,31 +47,31 @@
 - [x] 4.2 Store fetched offers under `sg_clear_v1:<storeId>` through the shared helper with a
       30-minute lifetime; verify a store opened twice in one session issues one request, and that
       after a simulated reload (cleared in-memory map, intact storage) it issues none
-- [ ] 4.3 Keep the in-memory `offerCache` as the first tier in front of storage; verify a repeat
+- [x] 4.3 Keep the in-memory `offerCache` as the first tier in front of storage; verify a repeat
       click within a session does not re-parse from storage (assert the storage read count)
 - [x] 4.4 Clear `sg_clear_v1:*` in `forgetToken` alongside the other namespaces; verify no
       clearance data survives forgetting the key
 
 ## 5. Stale-while-revalidate rendering
 
-- [ ] 5.1 Render stored offers immediately and start a single background refresh only when the
+- [x] 5.1 Render stored offers immediately and start a single background refresh only when the
       entry is stale; verify in the browser Network tab that a fresh entry fires no request and a
       stale one fires exactly one, with prices visible before it resolves
-- [ ] 5.2 Replace the list in place when a background refresh resolves, leaving the panel's scroll
+- [x] 5.2 Replace the list in place when a background refresh resolves, leaving the panel's scroll
       position usable; verify by making a stale store's refresh return a changed price
-- [ ] 5.3 On a failed background refresh keep the stale data on screen with a quiet note; verify
+- [x] 5.3 On a failed background refresh keep the stale data on screen with a quiet note; verify
       by taking the network offline and reopening a stale store — prices stay, panel does not
       blank, no error replaces the list
-- [ ] 5.4 Show "Opdateret kl. HH:MM" for stored data and a refreshing indicator while a refresh is
+- [x] 5.4 Show "Opdateret kl. HH:MM" for stored data and a refreshing indicator while a refresh is
       in flight; verify both appear in light and dark mode and at 375px width
-- [ ] 5.5 Make the existing "Opdatér" button force a refresh past the lifetime, and verify it
+- [x] 5.5 Make the existing "Opdatér" button force a refresh past the lifetime, and verify it
       still works while a cooldown is active by reporting the cooldown rather than appearing dead
 
 ## 6. Visible budget state
 
-- [ ] 6.1 Add a footer status line reporting cache/cooldown state; verify it reads the cooldown
+- [x] 6.1 Add a footer status line reporting cache/cooldown state; verify it reads the cooldown
       with a live countdown that ticks down and clears itself when the cooldown ends
-- [ ] 6.2 Verify a cooldown does not block cached browsing: with a cooldown active, opening a
+- [x] 6.2 Verify a cooldown does not block cached browsing: with a cooldown active, opening a
       store that has stored offers displays them and attempts no revalidation (Network tab)
 
 ## 7. Documentation
@@ -84,9 +84,9 @@
 
 ## 8. End-to-end verification
 
-- [ ] 8.1 With a live token, walk the full flow: open five stores, reload, reopen all five — the
+- [x] 8.1 With a live token, walk the full flow: open five stores, reload, reopen all five — the
       Network tab shows five `food-waste` requests before the reload and none after
-- [ ] 8.2 Click six pins as fast as possible and verify requests leave ~400 ms apart, all six
+- [x] 8.2 Click six pins as fast as possible and verify requests leave ~400 ms apart, all six
       succeed, and no 429 occurs — the case that currently breaks the app
 - [ ] 8.3 After opening 20 stores, verify total `localStorage` usage is within a few hundred KB,
       confirming the trim holds in practice

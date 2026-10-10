@@ -72,10 +72,39 @@ Scanning needs a secure context — `https://` or `localhost`.
 
 ## How it works
 
-- `index.html` — the whole UI and all styling.
+- `index.html` — the page shell, styled with Tailwind utility classes.
 - `app.js` — token gate, store loading, offer loading, rendering. Plain ES5-ish JavaScript,
-  no framework, no modules.
-- `vendor/` — Leaflet 1.9.4, vendored so there is no CDN dependency.
+  no framework, no modules. Most markup is built here.
+- `vendor/` — Leaflet 1.9.4 and the generated Tailwind stylesheet, both committed so there is no
+  CDN dependency and no build step at deploy time.
+
+### Layout
+
+Products are the subject: the offer grid takes at least half the screen, and the map is a smaller
+secondary column used for navigation. On arrival the grid is filled with every nearby store's
+offers from a single request; clicking a store pin filters the grid rather than fetching. On
+phones the grid is full-screen and the map opens behind the **Kort** button.
+
+The app renders **one light green/white theme**. It deliberately does not follow the operating
+system's dark-mode setting.
+
+### Styling (the one build step)
+
+Tailwind is the only thing in this project that needs building, and it never runs at deploy time —
+`vendor/tailwind.css` is committed and the published site just serves it.
+
+```sh
+npm install       # once
+npm run css       # regenerate vendor/tailwind.css
+npm run css:watch # while editing
+```
+
+Run it **whenever you change a class name**, then commit the regenerated file. Tailwind finds
+classes by scanning `index.html` and `app.js` as text, so every class must appear as a complete
+literal — a name assembled at runtime (`'text-' + tone`) is invisible to the scanner and will be
+missing from the output. The palette lives in `styles/input.css`.
+
+`node_modules/` is git-ignored; `vendor/tailwind.css` is **not**, on purpose.
 
 ### Caching
 
@@ -117,6 +146,7 @@ as-is. Any static host (Netlify, Cloudflare Pages, nginx, a USB stick) works the
 ## Open source components
 
 - [Leaflet](https://leafletjs.com) — BSD-2-Clause (`vendor/LEAFLET-LICENSE`)
+- [Tailwind CSS](https://tailwindcss.com) — MIT, used as a build-time tool only
 - Map tiles from [OpenStreetMap](https://www.openstreetmap.org/copyright) — ODbL.
   The public tile server has a [usage policy](https://operations.osmfoundation.org/policies/tiles/);
   point `app.js` at your own tile server for heavy traffic.

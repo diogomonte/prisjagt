@@ -1,0 +1,15 @@
+{
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
+    "tailwindcss": "^4.3.3"
+  },
+  "name": "prisjagt",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Dev-only tooling. The published site is static files; nothing here runs at deploy time or in the browser.",
+  "license": "MIT",
+  "scripts": {
+    "css": "tailwindcss -i styles/input.css -o vendor/tailwind.css --minify",
+    "css:watch": "tailwindcss -i styles/input.css -o vendor/tailwind.css --watch"
+  }
+}

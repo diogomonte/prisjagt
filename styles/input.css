@@ -1,0 +1,23 @@
+/* Tailwind input. Build with `npm run css` -> vendor/tailwind.css (committed).
+   Never runs at deploy time; regenerate only when class names change. */
+@import "tailwindcss";
+
+/* Markup lives mostly in app.js, so it must be scanned too. */
+@source "../index.html";
+@source "../app.js";
+
+@theme {
+  /* One light theme. No dark variants are defined anywhere on purpose. */
+  --color-brand: #0a6c3d;
+  --color-brand-dark: #085530;
+  --color-brand-mid: #2f8f5b;
+  --color-brand-soft: #eef7f1;
+  --color-brand-wash: #f6fbf8;
+  --color-brand-line: #cfe7d8;
+  --color-ink: #16191d;
+  --color-muted: #5d6673;
+  /* Discounts need a colour that is not the brand, or "green" would mean both
+     the product identity and the saving. */
+  --color-deal: #c2410c;
+  --color-deal-soft: #fff1e9;
+}
