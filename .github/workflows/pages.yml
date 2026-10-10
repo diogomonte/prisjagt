@@ -23,9 +23,54 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+
+      # Publish an explicit allowlist. An exclude list would silently publish
+      # any directory added later; this cannot.
+      - name: Stage the site
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp index.html app.js dist/
+          cp -R vendor dist/
+          echo "staged:"; find dist -type f | sort
+
+      # The site's API key. NOTE: this is embedded in a static page and is
+      # therefore PUBLIC - anyone can read it in the served HTML. The repository
+      # secret only keeps it out of the repo and the build log.
+      - name: Inject the API key
+        env:
+          SALLING_API_KEY: ${{ secrets.SALLING_API_KEY }}
+        run: |
+          set -euo pipefail
+          marker='/* PRISJAGT_TOKEN_INJECTION_POINT */'
+          if ! grep -qF "$marker" dist/index.html; then
+            echo "::error::Injection marker not found in index.html - refusing to publish a site with no credential."
+            exit 1
+          fi
+          if [ -z "${SALLING_API_KEY}" ]; then
+            echo "::error::SALLING_API_KEY secret is empty. Set it in Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          python3 - "$SALLING_API_KEY" <<'PY'
+          import json, sys, io
+          key = sys.argv[1]
+          marker = '/* PRISJAGT_TOKEN_INJECTION_POINT */'
+          path = 'dist/index.html'
+          page = io.open(path, encoding='utf-8').read()
+          # json.dumps gives correct JS string escaping for any key content
+          page = page.replace(marker, 'window.PRISJAGT_TOKEN = %s;' % json.dumps(key))
+          io.open(path, 'w', encoding='utf-8').write(page)
+          PY
+          if grep -qF "$marker" dist/index.html; then
+            echo "::error::Marker still present after substitution."
+            exit 1
+          fi
+          echo "API key injected (it is public in the published page by design)."
+
       - name: Upload site
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: dist
+
       - id: deployment
         uses: actions/deploy-pages@v4

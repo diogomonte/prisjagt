@@ -55,6 +55,9 @@ no key is committed to this repository and there is no backend.
 Without the Products EAN scope the map and clearance browsing work exactly as normal — only
 barcode lookups report the missing grant.
 
+If the site you are visiting already supplies a key, you can skip all of this — paste your own only
+if you would rather use your own quota.
+
 The token is kept in your browser's `localStorage` and is only ever sent to
 `api.sallinggroup.com`. "Glem min API-nøgle" in the footer deletes it.
 
@@ -138,10 +141,50 @@ footer; cached stores still open normally while it waits. The `retry-after` head
 — it was observed returning `46443` (12.9 hours) while the body said "a minute" — so the value is
 clamped to between 5 and 300 seconds.
 
-## Self-hosting
+## Deploying to GitHub Pages
 
-Push the repository and enable GitHub Pages — `.github/workflows/pages.yml` publishes the files
-as-is. Any static host (Netlify, Cloudflare Pages, nginx, a USB stick) works the same way.
+The workflow in `.github/workflows/pages.yml` stages `index.html`, `app.js` and `vendor/` into a
+publish directory and uploads only those — planning docs, the dev server and `node_modules/` are
+never published. No build runs at deploy time; the committed `vendor/tailwind.css` is served as-is.
+
+Three things must be set up by hand, because none of them lives in the repository:
+
+1. **Register the site's origin on your API key.** In the Salling Group portal, add your Pages
+   origin (e.g. `https://you.github.io`) under **Origins** on the credential. Without this every
+   request fails in the browser with a CORS error while the same key works fine from `curl` —
+   Salling only sends `Access-Control-Allow-Origin` on *successful* responses for registered
+   origins.
+2. **Add the key as a repository secret** named `SALLING_API_KEY`
+   (Settings → Secrets and variables → Actions). The deploy injects it into the published page so
+   visitors need no key of their own. If the secret is missing or the injection marker has been
+   removed from `index.html`, the deploy **fails loudly** rather than publishing a site that
+   silently asks every visitor for a key.
+3. **Set Settings → Pages → Source to "GitHub Actions"**, or the workflow deploys nothing.
+
+Any other static host works the same way — serve the same three paths and inject the key yourself.
+
+### The deployed key is public
+
+> A key injected into a static site **cannot be kept secret**. The GitHub secret keeps it out of
+> the repository and the build log; it does not keep it out of the HTML and JavaScript that are
+> served. Anyone can open DevTools and read it.
+
+Restricting the key to your origin stops *other websites* using it in a browser. It is a browser
+mechanism and nothing more — a direct HTTP client such as `curl` ignores CORS entirely, so the key
+remains usable by anyone who copies it. Salling Group may revoke a key that is abused.
+
+This is the deliberate trade for visitors not needing their own account. If you would rather not
+make that trade, leave `SALLING_API_KEY` unset: the deploy then fails, and you can remove the
+injection step so every visitor supplies their own key instead.
+
+### Which key gets used
+
+| Situation | Key used |
+|---|---|
+| Visitor has pasted their own | **Theirs** — their own quota |
+| Visitor has pasted nothing | The site's injected key |
+| Visitor clicks "Glem min API-nøgle" | Falls back to the site's key, or the gate if there is none |
+| The site's key is rejected | The gate appears, explaining the site's key is not working |
 
 ## Open source components
 

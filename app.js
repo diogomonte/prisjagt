@@ -32,8 +32,27 @@
 
   /* ---------- API ---------- */
 
-  function token() {
+  // A deployment may inject a credential so visitors need none of their own.
+  // It is suppressed for the session once rejected, otherwise clearing storage
+  // would fall straight back to the same bad key and loop.
+  var injectedRejected = false;
+  var TOKEN_PLACEHOLDER = 'PRISJAGT_TOKEN_NOT_SET';
+
+  function injectedToken() {
+    if (injectedRejected) return null;
+    var value = typeof window !== 'undefined' ? window.PRISJAGT_TOKEN : null;
+    if (typeof value !== 'string' || !value) return null;
+    // Guard against a deploy that wrote the marker through unsubstituted.
+    return value === TOKEN_PLACEHOLDER ? null : value;
+  }
+
+  function storedToken() {
     try { return localStorage.getItem(TOKEN_KEY); } catch (e) { return null; }
+  }
+
+  // The visitor's own credential wins, so they can use their own quota.
+  function token() {
+    return storedToken() || injectedToken();
   }
 
   /* ---------- request pacing ---------- */
@@ -468,7 +487,7 @@
     el('app-foot').classList.add('flex');
   }
 
-  function forgetToken(message) {
+  function clearCredentialState() {
     try {
       localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem(STORES_KEY);
@@ -476,7 +495,35 @@
     cacheDrop(CLEAR_PREFIX);
     cacheDrop(EAN_PREFIX);
     offerCache.clear();
+    allOffers = [];
+  }
+
+  // Called when a credential is rejected. If the rejected one was injected by
+  // the deployment, suppress it for the session so the gate is reachable.
+  function forgetToken(message) {
+    var wasInjected = !storedToken() && !!injectedToken();
+    clearCredentialState();
+    if (wasInjected) {
+      // The caller's generic "your key is invalid" would be misleading: the
+      // visitor never supplied one. Name the site's key as the problem.
+      injectedRejected = true;
+      showGate('Sidens egen API-nøgle virker ikke lige nu. ' +
+        'Indsæt din egen nøgle for at fortsætte.', true);
+      return;
+    }
     showGate(message || 'Nøglen er slettet fra din browser.', false);
+  }
+
+  // Called when the visitor discards their own key. Falls back to the site's
+  // key when there is one, rather than forcing them to supply another.
+  function discardOwnToken() {
+    clearCredentialState();
+    if (injectedToken()) {
+      showApp();
+      boot(true);
+      return;
+    }
+    showGate('Nøglen er slettet fra din browser.', false);
   }
 
   function saveToken(ev) {
@@ -1287,7 +1334,7 @@
     el('ean-scan').classList.remove('hidden');
     el('ean-scan').addEventListener('click', startScan);
   }
-  el('forget').addEventListener('click', function () { forgetToken(); });
+  el('forget').addEventListener('click', function () { discardOwnToken(); });
   el('locate').addEventListener('click', locate);
   el('reload-stores').addEventListener('click', function () {
     allOffers = [];
